@@ -1,4 +1,9 @@
-import { Check, Crown, Sparkles, Zap } from "lucide-react";
+import {
+  Check,
+  Crown,
+  Sparkles,
+  Zap,
+} from "lucide-react";
 
 import Button from "../ui/Button";
 import GlassCard from "../ui/GlassCard";
@@ -20,6 +25,7 @@ const plans = [
       "متابعة تقدم التعلم",
     ],
     button: "ابدأ مجانًا",
+    href: "/register",
   },
   {
     name: "الباقة الاحترافية",
@@ -38,6 +44,7 @@ const plans = [
       "دعم فني سريع",
     ],
     button: "اشترك الآن",
+    href: "/checkout?plan=monthly",
   },
   {
     name: "الباقة السنوية",
@@ -56,6 +63,7 @@ const plans = [
       "الوصول إلى التحديثات الجديدة",
     ],
     button: "اشترك سنويًا",
+    href: "/checkout?plan=yearly",
   },
 ];
 
@@ -71,7 +79,7 @@ export default function Pricing() {
           badge="اختر الباقة المناسبة"
           title="استثمر في"
           highlightedText="مستقبلك اليوم"
-          description="اشترك مرة واحدة واستمتع بمئات الكورسات في مختلف المجالات."
+          description="اختر الباقة المناسبة واستمتع بمئات الكورسات في مختلف المجالات."
           align="center"
         />
 
@@ -133,6 +141,7 @@ export default function Pricing() {
                 </div>
 
                 <Button
+                  href={plan.href}
                   variant={
                     plan.featured
                       ? "primary"
