@@ -1,13 +1,12 @@
 import Link from "next/link";
 import {
   CheckCircle2,
-  CreditCard,
-  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 
 import Navbar from "../../components/layout/Navbar";
 import Footer from "../../components/layout/Footer";
+import CheckoutForm from "../../components/checkout/CheckoutForm";
 
 type CheckoutPageProps = {
   searchParams: Promise<{
@@ -58,15 +57,13 @@ export default async function CheckoutPage({
     ? params.plan[0]
     : params.plan;
 
-  const selectedPlan =
-    planParam === "yearly"
-      ? plans.yearly
-      : plans.monthly;
-
-  const selectedPlanKey =
+  const selectedPlanKey: "monthly" | "yearly" =
     planParam === "yearly"
       ? "yearly"
       : "monthly";
+
+  const selectedPlan =
+    plans[selectedPlanKey];
 
   return (
     <main className="min-h-screen bg-[#09090B] text-white">
@@ -125,109 +122,7 @@ export default async function CheckoutPage({
           </div>
 
           <div className="mt-12 grid gap-8 lg:grid-cols-[1fr_420px]">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-7 md:p-9">
-              <div className="flex items-center gap-3">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-500/10 text-purple-400">
-                  <CreditCard size={25} />
-                </span>
-
-                <div>
-                  <h2 className="text-2xl font-black">
-                    بيانات الدفع
-                  </h2>
-
-                  <p className="mt-1 text-sm text-zinc-500">
-                    أدخل بياناتك لإتمام الاشتراك.
-                  </p>
-                </div>
-              </div>
-
-              <form className="mt-8 space-y-6">
-                <div>
-                  <label
-                    htmlFor="fullName"
-                    className="mb-2 block text-sm font-bold text-zinc-300"
-                  >
-                    الاسم بالكامل
-                  </label>
-
-                  <input
-                    id="fullName"
-                    name="fullName"
-                    type="text"
-                    placeholder="اكتب اسمك بالكامل"
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-5 py-4 text-white outline-none transition placeholder:text-zinc-600 focus:border-purple-500"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="email"
-                    className="mb-2 block text-sm font-bold text-zinc-300"
-                  >
-                    البريد الإلكتروني
-                  </label>
-
-                  <input
-                    id="email"
-                    name="email"
-                    type="email"
-                    dir="ltr"
-                    placeholder="name@example.com"
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-5 py-4 text-left text-white outline-none transition placeholder:text-zinc-600 focus:border-purple-500"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="phone"
-                    className="mb-2 block text-sm font-bold text-zinc-300"
-                  >
-                    رقم الهاتف
-                  </label>
-
-                  <input
-                    id="phone"
-                    name="phone"
-                    type="tel"
-                    dir="ltr"
-                    placeholder="01xxxxxxxxx"
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-5 py-4 text-left text-white outline-none transition placeholder:text-zinc-600 focus:border-purple-500"
-                  />
-                </div>
-
-                <div className="rounded-2xl border border-purple-500/20 bg-purple-500/[0.06] p-5">
-                  <div className="flex items-start gap-3">
-                    <ShieldCheck
-                      size={23}
-                      className="mt-1 shrink-0 text-purple-400"
-                    />
-
-                    <div>
-                      <p className="font-bold">
-                        دفع آمن ومحمي
-                      </p>
-
-                      <p className="mt-1 text-sm leading-7 text-zinc-400">
-                        لن يتم تخزين بيانات الدفع داخل الموقع، وسيتم
-                        تحويلك إلى بوابة الدفع الآمنة.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="w-full rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 text-lg font-black transition hover:scale-[1.01] hover:shadow-xl hover:shadow-purple-950/40"
-                >
-                  متابعة للدفع
-                </button>
-
-                <p className="text-center text-xs leading-6 text-zinc-500">
-                  بالمتابعة أنت توافق على شروط الاستخدام وسياسة الخصوصية.
-                </p>
-              </form>
-            </div>
+            <CheckoutForm plan={selectedPlanKey} />
 
             <aside className="h-fit rounded-3xl border border-purple-500/20 bg-gradient-to-b from-purple-500/10 to-white/[0.03] p-7">
               <p className="text-sm font-bold text-purple-300">
