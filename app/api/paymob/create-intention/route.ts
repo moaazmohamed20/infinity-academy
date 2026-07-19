@@ -5,6 +5,9 @@ import {
   NextResponse,
 } from "next/server";
 
+import { createClient } from "../../../../lib/supabase/server";
+import { createAdminClient } from "../../../../lib/supabase/admin";
+
 export const runtime = "nodejs";
 
 type PlanKey = "monthly" | "yearly";
@@ -14,6 +17,11 @@ type CheckoutRequestBody = {
   fullName?: unknown;
   email?: unknown;
   phone?: unknown;
+};
+
+type PaymobResponse = {
+  id?: unknown;
+  client_secret?: unknown;
 };
 
 const plans: Record<
@@ -74,7 +82,8 @@ function splitFullName(fullName: string) {
     .split(/\s+/)
     .filter(Boolean);
 
-  const firstName = nameParts[0] || "Customer";
+  const firstName =
+    nameParts[0] || "Customer";
 
   const lastName =
     nameParts.slice(1).join(" ") ||
@@ -120,131 +129,223 @@ function getEnvironmentVariables() {
 export async function POST(
   request: NextRequest
 ) {
+  const environmentVariables =
+    getEnvironmentVariables();
+
+  if (!environmentVariables) {
+    return NextResponse.json(
+      {
+        error:
+          "إعدادات Paymob غير مكتملة على السيرفر.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+
+  const supabase = await createClient();
+
+  const {
+    data: claimsData,
+    error: claimsError,
+  } = await supabase.auth.getClaims();
+
+  if (
+    claimsError ||
+    !claimsData?.claims
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "يجب تسجيل الدخول قبل إتمام الاشتراك.",
+      },
+      {
+        status: 401,
+      }
+    );
+  }
+
+  const claims =
+    claimsData.claims as Record<
+      string,
+      unknown
+    >;
+
+  const userId =
+    typeof claims.sub === "string"
+      ? claims.sub
+      : "";
+
+  if (!userId) {
+    return NextResponse.json(
+      {
+        error:
+          "تعذر التعرف على حساب المستخدم.",
+      },
+      {
+        status: 401,
+      }
+    );
+  }
+
+  let body: CheckoutRequestBody;
+
   try {
-    const environmentVariables =
-      getEnvironmentVariables();
+    body =
+      (await request.json()) as CheckoutRequestBody;
+  } catch {
+    return NextResponse.json(
+      {
+        error:
+          "بيانات الطلب غير صحيحة.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
 
-    if (!environmentVariables) {
-      return NextResponse.json(
-        {
-          error:
-            "إعدادات Paymob غير مكتملة على السيرفر.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
+  const plan: PlanKey | null =
+    body.plan === "yearly"
+      ? "yearly"
+      : body.plan === "monthly"
+        ? "monthly"
+        : null;
 
-    let body: CheckoutRequestBody;
+  const fullName =
+    typeof body.fullName === "string"
+      ? body.fullName.trim()
+      : "";
 
-    try {
-      body =
-        (await request.json()) as CheckoutRequestBody;
-    } catch {
-      return NextResponse.json(
-        {
-          error:
-            "بيانات الطلب غير صحيحة.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+  const email =
+    typeof body.email === "string"
+      ? body.email.trim().toLowerCase()
+      : "";
 
-    const plan: PlanKey | null =
-      body.plan === "yearly"
-        ? "yearly"
-        : body.plan === "monthly"
-          ? "monthly"
-          : null;
+  const phone =
+    typeof body.phone === "string"
+      ? body.phone.trim()
+      : "";
 
-    const fullName =
-      typeof body.fullName === "string"
-        ? body.fullName.trim()
-        : "";
+  if (!plan) {
+    return NextResponse.json(
+      {
+        error:
+          "الباقة المختارة غير صحيحة.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
 
-    const email =
-      typeof body.email === "string"
-        ? body.email.trim().toLowerCase()
-        : "";
+  if (fullName.length < 3) {
+    return NextResponse.json(
+      {
+        error:
+          "اكتب الاسم بالكامل.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
 
-    const phone =
-      typeof body.phone === "string"
-        ? body.phone.trim()
-        : "";
+  if (!isValidEmail(email)) {
+    return NextResponse.json(
+      {
+        error:
+          "اكتب بريدًا إلكترونيًا صحيحًا.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
 
-    if (!plan) {
-      return NextResponse.json(
-        {
-          error:
-            "الباقة المختارة غير صحيحة.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+  const normalizedPhone =
+    normalizeEgyptianPhone(phone);
 
-    if (fullName.length < 3) {
-      return NextResponse.json(
-        {
-          error:
-            "اكتب الاسم بالكامل.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+  if (!normalizedPhone) {
+    return NextResponse.json(
+      {
+        error:
+          "اكتب رقم هاتف مصري صحيحًا.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
 
-    if (!isValidEmail(email)) {
-      return NextResponse.json(
-        {
-          error:
-            "اكتب بريدًا إلكترونيًا صحيحًا.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+  const selectedPlan = plans[plan];
 
-    const normalizedPhone =
-      normalizeEgyptianPhone(phone);
+  const {
+    firstName,
+    lastName,
+  } = splitFullName(fullName);
 
-    if (!normalizedPhone) {
-      return NextResponse.json(
-        {
-          error:
-            "اكتب رقم هاتف مصري صحيحًا.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+  const siteUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    request.nextUrl.origin
+  ).replace(/\/+$/, "");
 
-    const selectedPlan = plans[plan];
+  const specialReference =
+    `IA-${Date.now()}-` +
+    randomUUID()
+      .replace(/-/g, "")
+      .slice(0, 10)
+      .toUpperCase();
 
-    const {
-      firstName,
-      lastName,
-    } = splitFullName(fullName);
+  const adminSupabase =
+    createAdminClient();
 
-    const siteUrl = (
-      process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-      request.nextUrl.origin
-    ).replace(/\/+$/, "");
+  const {
+    data: paymentRecord,
+    error: paymentInsertError,
+  } = await adminSupabase
+    .from("payment_transactions")
+    .insert({
+      user_id: userId,
+      provider: "paymob",
+      plan_key: plan,
+      status: "pending",
+      amount_cents:
+        selectedPlan.amount,
+      currency: "EGP",
+      special_reference:
+        specialReference,
+      customer_email: email,
+      customer_phone:
+        normalizedPhone,
+      is_test: true,
+      hmac_verified: false,
+    })
+    .select("id")
+    .single();
 
-    const specialReference =
-      `IA-${Date.now()}-` +
-      randomUUID()
-        .replace(/-/g, "")
-        .slice(0, 10)
-        .toUpperCase();
+  if (
+    paymentInsertError ||
+    !paymentRecord
+  ) {
+    console.error(
+      "Payment record insert error:",
+      paymentInsertError
+    );
 
+    return NextResponse.json(
+      {
+        error:
+          "تعذر تسجيل عملية الدفع داخل الموقع.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+
+  try {
     const paymobResponse = await fetch(
       "https://accept.paymob.com/v1/intention/",
       {
@@ -283,7 +384,8 @@ export async function POST(
             last_name: lastName,
             street: "NA",
             building: "NA",
-            phone_number: normalizedPhone,
+            phone_number:
+              normalizedPhone,
             city: "Cairo",
             country: "EG",
             email,
@@ -308,22 +410,38 @@ export async function POST(
     const responseText =
       await paymobResponse.text();
 
-    let paymobData: unknown = null;
+    let paymobData: PaymobResponse = {};
 
     try {
       paymobData = JSON.parse(
         responseText
-      );
+      ) as PaymobResponse;
     } catch {
-      paymobData = null;
+      paymobData = {};
     }
 
     if (!paymobResponse.ok) {
       console.error(
         "Paymob intention error:",
         paymobResponse.status,
-        paymobData || responseText
+        paymobData
       );
+
+      await adminSupabase
+        .from("payment_transactions")
+        .update({
+          status: "failed",
+
+          raw_payload: {
+            stage:
+              "create_intention",
+            status:
+              paymobResponse.status,
+            response:
+              paymobData,
+          },
+        })
+        .eq("id", paymentRecord.id);
 
       return NextResponse.json(
         {
@@ -337,19 +455,25 @@ export async function POST(
     }
 
     const clientSecret =
-      paymobData &&
-      typeof paymobData === "object" &&
-      "client_secret" in paymobData &&
       typeof paymobData.client_secret ===
-        "string"
+      "string"
         ? paymobData.client_secret
         : "";
 
     if (!clientSecret) {
-      console.error(
-        "Paymob response missing client_secret:",
-        paymobData
-      );
+      await adminSupabase
+        .from("payment_transactions")
+        .update({
+          status: "failed",
+
+          raw_payload: {
+            stage:
+              "missing_client_secret",
+            response:
+              paymobData,
+          },
+        })
+        .eq("id", paymentRecord.id);
 
       return NextResponse.json(
         {
@@ -361,6 +485,28 @@ export async function POST(
         }
       );
     }
+
+    const paymobIntentionId =
+      paymobData.id !== undefined &&
+      paymobData.id !== null
+        ? String(paymobData.id)
+        : null;
+
+    await adminSupabase
+      .from("payment_transactions")
+      .update({
+        paymob_intention_id:
+          paymobIntentionId,
+
+        raw_payload: {
+          stage:
+            "intention_created",
+
+          intention_id:
+            paymobIntentionId,
+        },
+      })
+      .eq("id", paymentRecord.id);
 
     const checkoutUrl =
       "https://accept.paymob.com/unifiedcheckout/" +
@@ -381,6 +527,18 @@ export async function POST(
       "Create Paymob intention error:",
       error
     );
+
+    await adminSupabase
+      .from("payment_transactions")
+      .update({
+        status: "failed",
+
+        raw_payload: {
+          stage:
+            "unexpected_error",
+        },
+      })
+      .eq("id", paymentRecord.id);
 
     return NextResponse.json(
       {
