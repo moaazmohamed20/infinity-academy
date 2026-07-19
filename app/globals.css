@@ -1,0 +1,201 @@
+@import "tailwindcss";
+
+:root {
+  --background: #09090b;
+  --foreground: #ffffff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --font-sans: var(--font-cairo);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    var(--font-cairo),
+    Arial,
+    Helvetica,
+    sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+
+img {
+  max-width: 100%;
+}
+
+::selection {
+  background: rgba(147, 51, 234, 0.45);
+  color: #ffffff;
+}
+
+/* إظهار إطار واضح عند استخدام لوحة المفاتيح */
+:focus-visible {
+  outline: 2px solid #a855f7;
+  outline-offset: 3px;
+}
+
+/* شريط التمرير في Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #7c3aed #09090b;
+}
+
+/* شريط التمرير في Chrome وEdge وSafari */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #09090b;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid #09090b;
+  border-radius: 999px;
+  background: linear-gradient(
+    to bottom,
+    #9333ea,
+    #4f46e5
+  );
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a855f7;
+}
+
+/* Swiper */
+.course-swiper {
+  --swiper-theme-color: #a855f7;
+  padding: 10px 4px 50px;
+}
+
+.course-swiper .swiper-wrapper {
+  align-items: stretch;
+}
+
+.course-swiper .swiper-slide {
+  height: auto;
+}
+
+.course-swiper .swiper-slide > * {
+  height: 100%;
+}
+
+/* أزرار التنقل */
+.course-swiper .swiper-button-next,
+.course-swiper .swiper-button-prev {
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: rgba(9, 9, 11, 0.85);
+  color: #c084fc;
+  backdrop-filter: blur(12px);
+  transition:
+    border-color 0.3s ease,
+    background-color 0.3s ease,
+    color 0.3s ease,
+    transform 0.3s ease;
+}
+
+.course-swiper .swiper-button-next:hover,
+.course-swiper .swiper-button-prev:hover {
+  border-color: rgba(168, 85, 247, 0.55);
+  background: rgba(147, 51, 234, 0.22);
+  color: #ffffff;
+  transform: scale(1.05);
+}
+
+.course-swiper .swiper-button-next::after,
+.course-swiper .swiper-button-prev::after {
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.course-swiper .swiper-button-disabled {
+  opacity: 0.3;
+}
+
+/* نقاط التنقل */
+.course-swiper .swiper-pagination {
+  bottom: 4px;
+}
+
+.course-swiper .swiper-pagination-bullet {
+  width: 8px;
+  height: 8px;
+  margin: 0 5px !important;
+  background: #71717a;
+  opacity: 0.45;
+  transition:
+    width 0.3s ease,
+    background-color 0.3s ease,
+    opacity 0.3s ease;
+}
+
+.course-swiper .swiper-pagination-bullet-active {
+  width: 26px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to left,
+    #9333ea,
+    #4f46e5
+  );
+  opacity: 1;
+}
+
+/* إخفاء أسهم السلايدر على الشاشات الصغيرة */
+@media (max-width: 639px) {
+  .course-swiper .swiper-button-next,
+  .course-swiper .swiper-button-prev {
+    display: none;
+  }
+}
+
+/* تقليل الحركة لمن يفضل ذلك */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
