@@ -9,6 +9,7 @@ import { createClient } from "../../../../lib/supabase/server";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type PlanKey = "monthly" | "yearly";
 
@@ -400,7 +401,7 @@ export async function POST(
             `${siteUrl}/api/paymob/webhook`,
 
           redirection_url:
-            `${siteUrl}/payment/result`,
+            `${siteUrl}/api/paymob/return`,
         }),
 
         cache: "no-store",
