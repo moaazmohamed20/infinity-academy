@@ -117,7 +117,7 @@ function createCallbackHmacString(
     transaction.error_occured,
     transaction.has_parent_transaction,
     transaction.id,
-    transaction.integration,
+    transaction.integration_id_id,
     transaction.is_3d_secure,
     transaction.is_auth,
     transaction.is_capture,
@@ -452,7 +452,7 @@ export async function POST(
 
     const callbackIntegrationId =
       Number(
-        transaction.integration
+        transaction.integration_id
       );
 
     if (
