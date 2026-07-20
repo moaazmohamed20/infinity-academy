@@ -23,33 +23,6 @@ type PaymentRecord = {
   is_test: boolean;
 };
 
-/*
- * ترتيب الحقول الرسمي لحساب HMAC
- * في Transaction Processed Callback الحالي.
- */
-const HMAC_FIELDS = [
-  "amount",
-  "created_at",
-  "currency",
-  "error_occured",
-  "has_parent_transaction",
-  "id",
-  "integration_id",
-  "is_3d_secure",
-  "is_auth",
-  "is_capture",
-  "is_refunded",
-  "is_standalone_payment",
-  "is_voided",
-  "order",
-  "owner",
-  "pending",
-  "source_data_pan",
-  "source_data_sub_type",
-  "source_data_type",
-  "success",
-] as const;
-
 function asRecord(
   value: unknown
 ): JsonRecord | null {
@@ -99,26 +72,21 @@ function toBoolean(
 
   if (typeof value === "string") {
     return (
-      value.trim().toLowerCase() ===
-      "true"
+      value
+        .trim()
+        .toLowerCase() === "true"
     );
   }
 
   return false;
 }
 
-/*
- * تحويل قيمة الحقل إلى النص المستخدم
- * داخل حساب HMAC.
- *
- * حقل order قد يصل ككائن يحتوي على id.
- */
 function toHmacValue(
   value: unknown
 ): string {
   if (
-    value === null ||
-    value === undefined
+    value === undefined ||
+    value === null
   ) {
     return "";
   }
@@ -131,29 +99,195 @@ function toHmacValue(
     const record = asRecord(value);
 
     if (
-      record &&
-      record.id !== null &&
-      record.id !== undefined
+      record?.id !== undefined &&
+      record.id !== null
     ) {
       return String(record.id);
     }
 
-    return JSON.stringify(value);
+    return "";
   }
 
   return String(value);
 }
 
-function createCallbackHmacString(
+function uniqueHmacValues(
+  ...values: unknown[]
+): string[] {
+  return [
+    ...new Set(
+      values.map(toHmacValue)
+    ),
+  ];
+}
+
+/*
+ * Paymob قد ترسل بيانات الـWebhook
+ * بأكثر من شكل.
+ *
+ * الشكل التقليدي:
+ * amount_cents
+ * integration
+ * order.id
+ * source_data.pan
+ *
+ * Unified Checkout:
+ * amount
+ * integration_id
+ * order
+ * source_data_pan
+ */
+function createCallbackHmacCandidates(
   transaction: JsonRecord
-): string {
-  return HMAC_FIELDS
-    .map((field) => {
-      return toHmacValue(
-        transaction[field]
+): string[] {
+  const order =
+    asRecord(
+      transaction.order
+    );
+
+  const integration =
+    asRecord(
+      transaction.integration
+    );
+
+  const sourceData =
+    asRecord(
+      transaction.source_data
+    );
+
+  const amountValues =
+    uniqueHmacValues(
+      transaction.amount_cents,
+      transaction.amount
+    );
+
+  const integrationValues =
+    uniqueHmacValues(
+      transaction.integration,
+      transaction.integration_id,
+      integration?.id
+    );
+
+  const orderValues =
+    uniqueHmacValues(
+      order?.id,
+      transaction.order
+    );
+
+  const panValues =
+    uniqueHmacValues(
+      sourceData?.pan,
+      transaction.source_data_pan
+    );
+
+  const subTypeValues =
+    uniqueHmacValues(
+      sourceData?.sub_type,
+      transaction.source_data_sub_type
+    );
+
+  const sourceTypeValues =
+    uniqueHmacValues(
+      sourceData?.type,
+      transaction.source_data_type
+    );
+
+  const candidates =
+    new Set<string>();
+
+  for (
+    const amountValue of
+    amountValues
+  ) {
+    for (
+      const integrationValue of
+      integrationValues
+    ) {
+      for (
+        const orderValue of
+        orderValues
+      ) {
+        for (
+          const panValue of
+          panValues
+        ) {
+          for (
+            const subTypeValue of
+            subTypeValues
+          ) {
+            for (
+              const sourceTypeValue of
+              sourceTypeValues
+            ) {
+              const values = [
+                amountValue,
+                transaction.created_at,
+                transaction.currency,
+                transaction.error_occured,
+                transaction.has_parent_transaction,
+                transaction.id,
+                integrationValue,
+                transaction.is_3d_secure,
+                transaction.is_auth,
+                transaction.is_capture,
+                transaction.is_refunded,
+                transaction.is_standalone_payment,
+                transaction.is_voided,
+                orderValue,
+                transaction.owner,
+                transaction.pending,
+                panValue,
+                subTypeValue,
+                sourceTypeValue,
+                transaction.success,
+              ];
+
+              candidates.add(
+                values
+                  .map(toHmacValue)
+                  .join("")
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return [...candidates];
+}
+
+function safeCompareHex(
+  firstHex: string,
+  secondHex: string
+): boolean {
+  try {
+    const firstBuffer =
+      Buffer.from(
+        firstHex,
+        "hex"
       );
-    })
-    .join("");
+
+    const secondBuffer =
+      Buffer.from(
+        secondHex,
+        "hex"
+      );
+
+    if (
+      firstBuffer.length !==
+      secondBuffer.length
+    ) {
+      return false;
+    }
+
+    return timingSafeEqual(
+      firstBuffer,
+      secondBuffer
+    );
+  } catch {
+    return false;
+  }
 }
 
 function verifyCallbackHmac(
@@ -166,9 +300,6 @@ function verifyCallbackHmac(
       .trim()
       .toLowerCase();
 
-  /*
-   * SHA-512 ينتج 128 حرفًا Hex.
-   */
   if (
     !/^[a-f0-9]{128}$/.test(
       normalizedReceivedHmac
@@ -177,54 +308,40 @@ function verifyCallbackHmac(
     return false;
   }
 
-  const calculatedHmac =
-    createHmac(
-      "sha512",
-      hmacSecret
-    )
-      .update(
-        createCallbackHmacString(
-          transaction
+  const candidates =
+    createCallbackHmacCandidates(
+      transaction
+    );
+
+  return candidates.some(
+    (candidate) => {
+      const calculatedHmac =
+        createHmac(
+          "sha512",
+          hmacSecret
         )
-      )
-      .digest("hex");
+          .update(candidate)
+          .digest("hex");
 
-  const receivedBuffer =
-    Buffer.from(
-      normalizedReceivedHmac,
-      "hex"
-    );
-
-  const calculatedBuffer =
-    Buffer.from(
-      calculatedHmac,
-      "hex"
-    );
-
-  if (
-    receivedBuffer.length !==
-    calculatedBuffer.length
-  ) {
-    return false;
-  }
-
-  return timingSafeEqual(
-    receivedBuffer,
-    calculatedBuffer
+      return safeCompareHex(
+        calculatedHmac,
+        normalizedReceivedHmac
+      );
+    }
   );
 }
 
 function getIntegrationId(
   transaction: JsonRecord
 ): string {
-  const integrationObject =
+  const integration =
     asRecord(
       transaction.integration
     );
 
   return getTextValue(
     transaction.integration_id,
-    integrationObject?.id,
+    integration?.id,
     transaction.integration
   );
 }
@@ -242,17 +359,22 @@ function getSpecialReference(
       transaction.intention
     );
 
+  const paymentIntention =
+    asRecord(
+      transaction.payment_intention
+    );
+
   const paymentKeyClaims =
     asRecord(
       transaction.payment_key_claims
     );
 
-  const extra =
+  const claimsExtra =
     asRecord(
       paymentKeyClaims?.extra
     );
 
-  const transactionExtras =
+  const extras =
     asRecord(
       transaction.extras
     );
@@ -261,17 +383,20 @@ function getSpecialReference(
     transaction.special_reference,
     transaction.merchant_order_id,
 
-    order?.merchant_order_id,
     order?.special_reference,
+    order?.merchant_order_id,
 
     intention?.special_reference,
     intention?.merchant_order_id,
 
-    extra?.special_reference,
-    extra?.merchant_order_id,
+    paymentIntention?.special_reference,
+    paymentIntention?.merchant_order_id,
 
-    transactionExtras?.special_reference,
-    transactionExtras?.merchant_order_id
+    claimsExtra?.special_reference,
+    claimsExtra?.merchant_order_id,
+
+    extras?.special_reference,
+    extras?.merchant_order_id
   );
 }
 
@@ -283,36 +408,63 @@ function getIntentionId(
       transaction.intention
     );
 
+  const paymentIntention =
+    asRecord(
+      transaction.payment_intention
+    );
+
   const paymentKeyClaims =
     asRecord(
       transaction.payment_key_claims
     );
 
-  const extra =
+  const claimsExtra =
     asRecord(
       paymentKeyClaims?.extra
     );
 
+  const intentionString =
+    typeof transaction.intention ===
+    "string"
+      ? transaction.intention
+      : "";
+
+  const paymentIntentionString =
+    typeof transaction.payment_intention ===
+    "string"
+      ? transaction.payment_intention
+      : "";
+
   return getTextValue(
     transaction.intention_id,
     transaction.payment_intention_id,
+
     intention?.id,
+    paymentIntention?.id,
 
-    /*
-     * يدعم وصول intention كسلسلة نصية.
-     */
-    transaction.intention,
+    intentionString,
+    paymentIntentionString,
 
-    extra?.intention_id,
-    extra?.payment_intention_id
+    claimsExtra?.intention_id,
+    claimsExtra?.payment_intention_id
   );
 }
 
 async function findPaymentRecord(
-  transaction: JsonRecord
+  transaction: JsonRecord,
+  callbackAmount: number,
+  callbackCurrency: string
 ): Promise<PaymentRecord | null> {
   const adminSupabase =
     createAdminClient();
+
+  const selectedColumns = `
+    id,
+    amount_cents,
+    currency,
+    special_reference,
+    is_test
+  `;
 
   const transactionId =
     getTextValue(
@@ -320,24 +472,17 @@ async function findPaymentRecord(
     );
 
   /*
-   * أولًا: البحث برقم معاملة Paymob.
-   * يفيد عند إعادة إرسال نفس Webhook.
+   * البحث برقم معاملة Paymob.
    */
   if (transactionId) {
     const {
       data,
       error,
     } = await adminSupabase
-      .from("payment_transactions")
-      .select(
-        `
-          id,
-          amount_cents,
-          currency,
-          special_reference,
-          is_test
-        `
+      .from(
+        "payment_transactions"
       )
+      .select(selectedColumns)
       .eq(
         "paymob_transaction_id",
         transactionId
@@ -354,7 +499,7 @@ async function findPaymentRecord(
   }
 
   /*
-   * ثانيًا: البحث بالمرجع الخاص بالموقع.
+   * البحث بالمرجع الخاص بالموقع.
    */
   const specialReference =
     getSpecialReference(
@@ -366,16 +511,10 @@ async function findPaymentRecord(
       data,
       error,
     } = await adminSupabase
-      .from("payment_transactions")
-      .select(
-        `
-          id,
-          amount_cents,
-          currency,
-          special_reference,
-          is_test
-        `
+      .from(
+        "payment_transactions"
       )
+      .select(selectedColumns)
       .eq(
         "special_reference",
         specialReference
@@ -392,51 +531,100 @@ async function findPaymentRecord(
   }
 
   /*
-   * ثالثًا: البحث برقم Payment Intention.
+   * البحث برقم Payment Intention.
    */
   const intentionId =
     getIntentionId(
       transaction
     );
 
-  if (!intentionId) {
-    return null;
+  if (intentionId) {
+    const {
+      data,
+      error,
+    } = await adminSupabase
+      .from(
+        "payment_transactions"
+      )
+      .select(selectedColumns)
+      .eq(
+        "paymob_intention_id",
+        intentionId
+      )
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (data) {
+      return data as PaymentRecord;
+    }
   }
+
+  /*
+   * بحث احتياطي:
+   * نستخدمه فقط عند وجود عملية Pending واحدة
+   * بنفس القيمة والعملة خلال آخر ساعتين.
+   */
+  const oldestAllowedDate =
+    new Date(
+      Date.now() -
+        2 * 60 * 60 * 1000
+    ).toISOString();
 
   const {
-    data,
-    error,
+    data: pendingPayments,
+    error: pendingPaymentsError,
   } = await adminSupabase
-    .from("payment_transactions")
-    .select(
-      `
-        id,
-        amount_cents,
-        currency,
-        special_reference,
-        is_test
-      `
+    .from(
+      "payment_transactions"
+    )
+    .select(selectedColumns)
+    .eq(
+      "status",
+      "pending"
     )
     .eq(
-      "paymob_intention_id",
-      intentionId
+      "amount_cents",
+      callbackAmount
     )
-    .maybeSingle();
+    .eq(
+      "currency",
+      callbackCurrency
+    )
+    .gte(
+      "created_at",
+      oldestAllowedDate
+    )
+    .order(
+      "created_at",
+      {
+        ascending: false,
+      }
+    )
+    .limit(2);
 
-  if (error) {
-    throw error;
+  if (pendingPaymentsError) {
+    throw pendingPaymentsError;
   }
 
-  return data
-    ? (data as PaymentRecord)
-    : null;
+  if (
+    pendingPayments &&
+    pendingPayments.length === 1
+  ) {
+    return pendingPayments[0] as PaymentRecord;
+  }
+
+  return null;
 }
 
 export async function POST(
   request: NextRequest
 ) {
   const hmacSecret =
-    process.env.PAYMOB_HMAC?.trim();
+    process.env.PAYMOB_HMAC
+      ?.trim();
 
   const expectedIntegrationId =
     Number(
@@ -503,21 +691,20 @@ export async function POST(
   }
 
   /*
-   * الشكل المعتاد:
+   * ندعم الشكل:
    *
    * {
    *   type: "TRANSACTION",
-   *   obj: { ... }
+   *   obj: {}
    * }
+   *
+   * وندعم وصول المعاملة مباشرة.
    */
   const transaction =
     asRecord(
       payloadRecord.obj
     ) ?? payloadRecord;
 
-  /*
-   * Paymob ترسل hmac داخل Query Parameters.
-   */
   const receivedHmac =
     request.nextUrl.searchParams
       .get("hmac") ??
@@ -530,15 +717,10 @@ export async function POST(
       transaction.id
     );
 
-  /*
-   * Intention Callback الحالي يستخدم amount.
-   * amount_cents موجود كاحتياط لقراءة القيمة فقط،
-   * لكنه لا يدخل في HMAC الحالي.
-   */
   const callbackAmount =
     Number(
-      transaction.amount ??
-      transaction.amount_cents
+      transaction.amount_cents ??
+      transaction.amount
     );
 
   const callbackCurrency =
@@ -583,6 +765,10 @@ export async function POST(
     );
   }
 
+  /*
+   * لا يتم تحديث الاشتراك
+   * قبل نجاح التحقق من HMAC.
+   */
   const isHmacValid =
     verifyCallbackHmac(
       transaction,
@@ -596,12 +782,38 @@ export async function POST(
       {
         transactionId,
         callbackIntegrationId,
+
         receivedHmacLength:
           receivedHmac.length,
-        hmacFields:
-          HMAC_FIELDS,
-        transactionKeys:
-          Object.keys(transaction),
+
+        callbackShape: {
+          hasAmountCents:
+            transaction.amount_cents !==
+            undefined,
+
+          hasAmount:
+            transaction.amount !==
+            undefined,
+
+          hasIntegration:
+            transaction.integration !==
+            undefined,
+
+          hasIntegrationId:
+            transaction.integration_id !==
+            undefined,
+
+          hasNestedSourceData:
+            asRecord(
+              transaction.source_data
+            ) !== null,
+
+          hasFlatSourceData:
+            transaction.source_data_type !==
+              undefined ||
+            transaction.source_data_pan !==
+              undefined,
+        },
       }
     );
 
@@ -616,6 +828,9 @@ export async function POST(
     );
   }
 
+  /*
+   * التأكد من تطابق Integration ID.
+   */
   if (
     !Number.isInteger(
       callbackIntegrationId
@@ -645,7 +860,9 @@ export async function POST(
   try {
     const paymentRecord =
       await findPaymentRecord(
-        transaction
+        transaction,
+        callbackAmount,
+        callbackCurrency
       );
 
     if (!paymentRecord) {
@@ -653,14 +870,19 @@ export async function POST(
         "Paymob payment record was not found.",
         {
           transactionId,
+
           specialReference:
             getSpecialReference(
               transaction
             ),
+
           intentionId:
             getIntentionId(
               transaction
             ),
+
+          callbackAmount,
+          callbackCurrency,
         }
       );
 
@@ -675,6 +897,9 @@ export async function POST(
       );
     }
 
+    /*
+     * التحقق من قيمة العملية.
+     */
     if (
       callbackAmount !==
       Number(
@@ -685,6 +910,7 @@ export async function POST(
         "Paymob callback amount mismatch.",
         {
           callbackAmount,
+
           storedAmount:
             paymentRecord.amount_cents,
         }
@@ -701,6 +927,9 @@ export async function POST(
       );
     }
 
+    /*
+     * التحقق من العملة.
+     */
     if (
       callbackCurrency !==
       paymentRecord.currency
@@ -710,6 +939,7 @@ export async function POST(
         "Paymob callback currency mismatch.",
         {
           callbackCurrency,
+
           storedCurrency:
             paymentRecord.currency,
         }
@@ -744,49 +974,34 @@ export async function POST(
 
     const paymentMethod = [
       getTextValue(
-        transaction.source_data_type,
-        sourceData?.type
+        sourceData?.type,
+        transaction.source_data_type
       ),
 
       getTextValue(
-        transaction.source_data_sub_type,
-        sourceData?.sub_type
+        sourceData?.sub_type,
+        transaction.source_data_sub_type
       ),
     ]
       .filter(Boolean)
       .join(" - ");
 
-    const success =
+    const isSuccessful =
       toBoolean(
         transaction.success
-      );
-
-    const pending =
-      toBoolean(
+      ) &&
+      !toBoolean(
         transaction.pending
-      );
-
-    const errorOccurred =
-      toBoolean(
+      ) &&
+      !toBoolean(
         transaction.error_occured
-      );
-
-    const isRefunded =
-      toBoolean(
+      ) &&
+      !toBoolean(
         transaction.is_refunded
-      );
-
-    const isVoided =
-      toBoolean(
+      ) &&
+      !toBoolean(
         transaction.is_voided
       );
-
-    const isSuccessful =
-      success &&
-      !pending &&
-      !errorOccurred &&
-      !isRefunded &&
-      !isVoided;
 
     const adminSupabase =
       createAdminClient();
@@ -798,7 +1013,8 @@ export async function POST(
       "process_paymob_payment",
       {
         p_special_reference:
-          paymentRecord.special_reference,
+          paymentRecord
+            .special_reference,
 
         p_success:
           isSuccessful,
@@ -812,10 +1028,6 @@ export async function POST(
         p_payment_method:
           paymentMethod || null,
 
-        /*
-         * نستخدم القيمة المخزنة عند إنشاء الدفع،
-         * وليس قيمة قادمة من Callback.
-         */
         p_is_test:
           paymentRecord.is_test,
 
@@ -845,8 +1057,11 @@ export async function POST(
       "Paymob webhook processed successfully.",
       {
         transactionId,
+
         specialReference:
-          paymentRecord.special_reference,
+          paymentRecord
+            .special_reference,
+
         isSuccessful,
       }
     );
@@ -854,8 +1069,7 @@ export async function POST(
     return NextResponse.json({
       received: true,
       processed: true,
-      success:
-        isSuccessful,
+      success: isSuccessful,
       result: data,
     });
   } catch (error) {
