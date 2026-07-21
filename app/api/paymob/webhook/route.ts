@@ -13,7 +13,10 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type JsonRecord = Record<string, unknown>;
+type JsonRecord = Record<
+  string,
+  unknown
+>;
 
 type PaymentRecord = {
   id: string;
@@ -92,11 +95,14 @@ function toHmacValue(
   }
 
   if (typeof value === "boolean") {
-    return value ? "true" : "false";
+    return value
+      ? "true"
+      : "false";
   }
 
   if (typeof value === "object") {
-    const record = asRecord(value);
+    const record =
+      asRecord(value);
 
     if (
       record?.id !== undefined &&
@@ -121,22 +127,6 @@ function uniqueHmacValues(
   ];
 }
 
-/*
- * Paymob قد ترسل بيانات الـWebhook
- * بأكثر من شكل.
- *
- * الشكل التقليدي:
- * amount_cents
- * integration
- * order.id
- * source_data.pan
- *
- * Unified Checkout:
- * amount
- * integration_id
- * order
- * source_data_pan
- */
 function createCallbackHmacCandidates(
   transaction: JsonRecord
 ): string[] {
@@ -471,9 +461,6 @@ async function findPaymentRecord(
       transaction.id
     );
 
-  /*
-   * البحث برقم معاملة Paymob.
-   */
   if (transactionId) {
     const {
       data,
@@ -498,9 +485,6 @@ async function findPaymentRecord(
     }
   }
 
-  /*
-   * البحث بالمرجع الخاص بالموقع.
-   */
   const specialReference =
     getSpecialReference(
       transaction
@@ -530,9 +514,6 @@ async function findPaymentRecord(
     }
   }
 
-  /*
-   * البحث برقم Payment Intention.
-   */
   const intentionId =
     getIntentionId(
       transaction
@@ -562,11 +543,6 @@ async function findPaymentRecord(
     }
   }
 
-  /*
-   * بحث احتياطي:
-   * نستخدمه فقط عند وجود عملية Pending واحدة
-   * بنفس القيمة والعملة خلال آخر ساعتين.
-   */
   const oldestAllowedDate =
     new Date(
       Date.now() -
@@ -690,16 +666,6 @@ export async function POST(
     );
   }
 
-  /*
-   * ندعم الشكل:
-   *
-   * {
-   *   type: "TRANSACTION",
-   *   obj: {}
-   * }
-   *
-   * وندعم وصول المعاملة مباشرة.
-   */
   const transaction =
     asRecord(
       payloadRecord.obj
@@ -720,7 +686,7 @@ export async function POST(
   const callbackAmount =
     Number(
       transaction.amount_cents ??
-      transaction.amount
+        transaction.amount
     );
 
   const callbackCurrency =
@@ -750,7 +716,9 @@ export async function POST(
         callbackAmount,
         callbackCurrency,
         transactionKeys:
-          Object.keys(transaction),
+          Object.keys(
+            transaction
+          ),
       }
     );
 
@@ -765,10 +733,6 @@ export async function POST(
     );
   }
 
-  /*
-   * لا يتم تحديث الاشتراك
-   * قبل نجاح التحقق من HMAC.
-   */
   const isHmacValid =
     verifyCallbackHmac(
       transaction,
@@ -828,9 +792,6 @@ export async function POST(
     );
   }
 
-  /*
-   * التأكد من تطابق Integration ID.
-   */
   if (
     !Number.isInteger(
       callbackIntegrationId
@@ -897,9 +858,6 @@ export async function POST(
       );
     }
 
-    /*
-     * التحقق من قيمة العملية.
-     */
     if (
       callbackAmount !==
       Number(
@@ -927,9 +885,6 @@ export async function POST(
       );
     }
 
-    /*
-     * التحقق من العملة.
-     */
     if (
       callbackCurrency !==
       paymentRecord.currency
@@ -1046,6 +1001,37 @@ export async function POST(
         {
           error:
             "تعذر تحديث عملية الدفع.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const {
+      error: promoFinalizeError,
+    } = await adminSupabase.rpc(
+      "finalize_promo_redemption",
+      {
+        p_special_reference:
+          paymentRecord
+            .special_reference,
+
+        p_success:
+          isSuccessful,
+      }
+    );
+
+    if (promoFinalizeError) {
+      console.error(
+        "Promo redemption finalization error:",
+        promoFinalizeError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر تحديث استخدام كود الخصم.",
         },
         {
           status: 500,

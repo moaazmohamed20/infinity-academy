@@ -10,6 +10,7 @@ import {
   CreditCard,
   LoaderCircle,
   ShieldCheck,
+  TicketPercent,
 } from "lucide-react";
 
 type CheckoutFormProps = {
@@ -21,6 +22,10 @@ type PaymentResponse = {
   checkoutUrl?: string;
   reference?: string;
   error?: string;
+  originalAmountCents?: number;
+  discountAmountCents?: number;
+  finalAmountCents?: number;
+  promoCode?: string | null;
 };
 
 export default function CheckoutForm({
@@ -35,8 +40,13 @@ export default function CheckoutForm({
   const [phone, setPhone] =
     useState("");
 
-  const [errorMessage, setErrorMessage] =
+  const [promoCode, setPromoCode] =
     useState("");
+
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState("");
 
   const [isLoading, setIsLoading] =
     useState(false);
@@ -69,6 +79,9 @@ export default function CheckoutForm({
             fullName,
             email,
             phone,
+            promoCode:
+              promoCode.trim() ||
+              undefined,
           }),
         }
       );
@@ -210,6 +223,47 @@ export default function CheckoutForm({
           />
         </div>
 
+        <div>
+          <label
+            htmlFor="promoCode"
+            className="mb-2 flex items-center gap-2 text-sm font-bold text-zinc-300"
+          >
+            <TicketPercent
+              size={18}
+              className="text-purple-400"
+            />
+            كود الخصم
+            <span className="text-xs font-normal text-zinc-600">
+              اختياري
+            </span>
+          </label>
+
+          <input
+            id="promoCode"
+            name="promoCode"
+            type="text"
+            dir="ltr"
+            autoComplete="off"
+            value={promoCode}
+            onChange={(event) =>
+              setPromoCode(
+                event.target.value
+                  .toUpperCase()
+                  .replace(/\s+/g, "")
+              )
+            }
+            disabled={isLoading}
+            placeholder="WELCOME20"
+            className="w-full rounded-2xl border border-purple-500/20 bg-purple-500/[0.05] px-5 py-4 text-left font-mono font-bold uppercase tracking-wider text-white outline-none transition placeholder:text-zinc-600 focus:border-purple-500 disabled:cursor-not-allowed disabled:opacity-60"
+          />
+
+          <p className="mt-2 text-xs leading-6 text-zinc-500">
+            سيتم التحقق من الكود وحساب
+            السعر المخفّض قبل تحويلك إلى
+            Paymob.
+          </p>
+        </div>
+
         {errorMessage && (
           <div
             role="alert"
@@ -239,8 +293,9 @@ export default function CheckoutForm({
               </p>
 
               <p className="mt-1 text-sm leading-7 text-zinc-400">
-                لن يتم تخزين بيانات بطاقتك داخل الموقع،
-                وسيتم تحويلك إلى بوابة Paymob الآمنة.
+                لن يتم تخزين بيانات بطاقتك
+                داخل الموقع، وسيتم تحويلك
+                إلى بوابة Paymob الآمنة.
               </p>
             </div>
           </div>
@@ -258,7 +313,8 @@ export default function CheckoutForm({
                 className="animate-spin"
               />
 
-              جاري تحويلك للدفع...
+              جاري حساب السعر وتحويلك
+              للدفع...
             </>
           ) : (
             "متابعة للدفع"
@@ -266,8 +322,8 @@ export default function CheckoutForm({
         </button>
 
         <p className="text-center text-xs leading-6 text-zinc-500">
-          بالمتابعة أنت توافق على شروط الاستخدام
-          وسياسة الخصوصية.
+          بالمتابعة أنت توافق على شروط
+          الاستخدام وسياسة الخصوصية.
         </p>
       </form>
     </div>

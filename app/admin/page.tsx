@@ -10,8 +10,10 @@ import {
   Settings,
   ShieldCheck,
   Tags,
+  TicketPercent,
   Users,
   UsersRound,
+  WalletCards,
 } from "lucide-react";
 
 import Navbar from "../../components/layout/Navbar";
@@ -47,6 +49,20 @@ const managementSections = [
       "إضافة الدروس والفيديوهات والملفات وترتيب المحتوى.",
     href: "/admin/lessons",
     icon: ListVideo,
+  },
+  {
+    title: "إدارة الباقات والأسعار",
+    description:
+      "تعديل أسعار الباقات ومميزاتها والتحكم في ظهورها والدفع الإلكتروني.",
+    href: "/admin/plans",
+    icon: WalletCards,
+  },
+  {
+    title: "إدارة أكواد الخصم",
+    description:
+      "إنشاء أكواد الخصم وتحديد قيمتها ومدتها وعدد مرات استخدامها.",
+    href: "/admin/promo-codes",
+    icon: TicketPercent,
   },
   {
     title: "إدارة الطلاب",
@@ -147,8 +163,10 @@ export default async function AdminPage() {
 
                 <p className="mt-3 max-w-2xl leading-7 text-zinc-400">
                   تحكم في الكورسات والتصنيفات
-                  وفرق التدريس والدروس والطلاب
-                  والاشتراكات من مكان واحد.
+                  وفرق التدريس والدروس
+                  والأسعار وأكواد الخصم
+                  والطلاب والاشتراكات من
+                  مكان واحد.
                 </p>
               </div>
             </div>
@@ -240,8 +258,9 @@ export default async function AdminPage() {
                   </h3>
 
                   <p className="mt-2 leading-7 text-zinc-400">
-                    تحديث اسم المدير ورقم الهاتف
-                    وكلمة مرور الحساب.
+                    تحديث اسم المدير ورقم
+                    الهاتف وكلمة مرور
+                    الحساب.
                   </p>
 
                   <span className="mt-4 inline-flex w-fit rounded-full border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-300">
