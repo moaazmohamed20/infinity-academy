@@ -13,10 +13,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type JsonRecord = Record<
-  string,
-  unknown
->;
+type JsonRecord = Record<string, unknown>;
 
 type PaymentRecord = {
   id: string;
@@ -75,9 +72,8 @@ function toBoolean(
 
   if (typeof value === "string") {
     return (
-      value
-        .trim()
-        .toLowerCase() === "true"
+      value.trim().toLowerCase() ===
+      "true"
     );
   }
 
@@ -602,18 +598,28 @@ export async function POST(
     process.env.PAYMOB_HMAC
       ?.trim();
 
-  const expectedIntegrationId =
+  const cardIntegrationId =
     Number(
       process.env
         .PAYMOB_INTEGRATION_ID
     );
 
+  const walletIntegrationId =
+    Number(
+      process.env
+        .PAYMOB_WALLET_INTEGRATION_ID
+    );
+
   if (
     !hmacSecret ||
     !Number.isInteger(
-      expectedIntegrationId
+      cardIntegrationId
     ) ||
-    expectedIntegrationId <= 0
+    cardIntegrationId <= 0 ||
+    !Number.isInteger(
+      walletIntegrationId
+    ) ||
+    walletIntegrationId <= 0
   ) {
     console.error(
       "Paymob webhook environment variables are missing."
@@ -629,6 +635,11 @@ export async function POST(
       }
     );
   }
+
+  const allowedIntegrationIds = [
+    cardIntegrationId,
+    walletIntegrationId,
+  ];
 
   let payload: unknown;
 
@@ -796,13 +807,14 @@ export async function POST(
     !Number.isInteger(
       callbackIntegrationId
     ) ||
-    callbackIntegrationId !==
-      expectedIntegrationId
+    !allowedIntegrationIds.includes(
+      callbackIntegrationId
+    )
   ) {
     console.error(
       "Paymob integration ID mismatch.",
       {
-        expectedIntegrationId,
+        allowedIntegrationIds,
         callbackIntegrationId,
       }
     );
@@ -1047,6 +1059,8 @@ export async function POST(
         specialReference:
           paymentRecord
             .special_reference,
+
+        callbackIntegrationId,
 
         isSuccessful,
       }

@@ -98,19 +98,35 @@ function getEnvironmentVariables() {
   const publicKey =
     process.env.PAYMOB_PUBLIC_KEY?.trim();
 
-  const integrationIdValue =
+  const cardIntegrationIdValue =
     process.env.PAYMOB_INTEGRATION_ID?.trim();
 
-  const integrationId = Number(
-    integrationIdValue
+  const walletIntegrationIdValue =
+    process.env
+      .PAYMOB_WALLET_INTEGRATION_ID
+      ?.trim();
+
+  const cardIntegrationId = Number(
+    cardIntegrationIdValue
+  );
+
+  const walletIntegrationId = Number(
+    walletIntegrationIdValue
   );
 
   if (
     !secretKey ||
     !publicKey ||
-    !integrationIdValue ||
-    !Number.isInteger(integrationId) ||
-    integrationId <= 0
+    !cardIntegrationIdValue ||
+    !walletIntegrationIdValue ||
+    !Number.isInteger(
+      cardIntegrationId
+    ) ||
+    cardIntegrationId <= 0 ||
+    !Number.isInteger(
+      walletIntegrationId
+    ) ||
+    walletIntegrationId <= 0
   ) {
     return null;
   }
@@ -118,7 +134,8 @@ function getEnvironmentVariables() {
   return {
     secretKey,
     publicKey,
-    integrationId,
+    cardIntegrationId,
+    walletIntegrationId,
   };
 }
 
@@ -158,7 +175,7 @@ export async function POST(
     return NextResponse.json(
       {
         error:
-          "إعدادات Paymob غير مكتملة على السيرفر.",
+          "إعدادات Paymob للكروت والمحافظ غير مكتملة على السيرفر.",
       },
       {
         status: 500,
@@ -632,7 +649,11 @@ export async function POST(
           currency,
 
           payment_methods: [
-            environmentVariables.integrationId,
+            environmentVariables
+              .cardIntegrationId,
+
+            environmentVariables
+              .walletIntegrationId,
           ],
 
           items: [
@@ -776,6 +797,14 @@ export async function POST(
           promo_code:
             appliedPromoCode ||
             null,
+
+          payment_methods: [
+            environmentVariables
+              .cardIntegrationId,
+
+            environmentVariables
+              .walletIntegrationId,
+          ],
         },
       })
       .eq("id", paymentRecordId);
