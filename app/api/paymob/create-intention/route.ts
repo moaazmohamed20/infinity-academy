@@ -18,34 +18,29 @@ type CheckoutRequestBody = {
   fullName?: unknown;
   email?: unknown;
   phone?: unknown;
+  promoCode?: unknown;
+};
+
+type PlanRow = {
+  plan_key: string;
+  name: string;
+  price_cents: number;
+  currency: string;
+  description: string;
+  paymob_enabled: boolean;
+  is_published: boolean;
+};
+
+type PromoReservationRow = {
+  promo_code_id: string;
+  normalized_code: string;
+  discount_amount_cents: number;
+  final_amount_cents: number;
 };
 
 type PaymobResponse = {
   id?: unknown;
   client_secret?: unknown;
-};
-
-const plans: Record<
-  PlanKey,
-  {
-    name: string;
-    amount: number;
-    description: string;
-  }
-> = {
-  monthly: {
-    name: "الباقة الاحترافية الشهرية",
-    amount: 29900,
-    description:
-      "اشتراك شهري في منصة Infinity Academy",
-  },
-
-  yearly: {
-    name: "الباقة السنوية",
-    amount: 249900,
-    description:
-      "اشتراك سنوي في منصة Infinity Academy",
-  },
 };
 
 function isValidEmail(email: string) {
@@ -125,6 +120,32 @@ function getEnvironmentVariables() {
     publicKey,
     integrationId,
   };
+}
+
+function getPromoErrorMessage(
+  errorMessage: string
+) {
+  const normalizedMessage =
+    errorMessage.toLowerCase();
+
+  if (
+    normalizedMessage.includes(
+      "كود الخصم"
+    ) ||
+    normalizedMessage.includes(
+      "الحد الأقصى"
+    ) ||
+    normalizedMessage.includes(
+      "استخدمت"
+    ) ||
+    normalizedMessage.includes(
+      "الباقة"
+    )
+  ) {
+    return errorMessage;
+  }
+
+  return "تعذر تطبيق كود الخصم.";
 }
 
 export async function POST(
@@ -229,6 +250,13 @@ export async function POST(
       ? body.phone.trim()
       : "";
 
+  const promoCode =
+    typeof body.promoCode === "string"
+      ? body.promoCode
+          .trim()
+          .toUpperCase()
+      : "";
+
   if (!plan) {
     return NextResponse.json(
       {
@@ -280,7 +308,89 @@ export async function POST(
     );
   }
 
-  const selectedPlan = plans[plan];
+  const adminSupabase =
+    createAdminClient();
+
+  const {
+    data: planData,
+    error: planError,
+  } = await adminSupabase
+    .from("subscription_plans")
+    .select(
+      `
+        plan_key,
+        name,
+        price_cents,
+        currency,
+        description,
+        paymob_enabled,
+        is_published
+      `
+    )
+    .eq("plan_key", plan)
+    .eq("is_published", true)
+    .eq("paymob_enabled", true)
+    .maybeSingle();
+
+  if (
+    planError ||
+    !planData
+  ) {
+    console.error(
+      "Subscription plan load error:",
+      planError
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "الباقة غير متاحة للدفع حاليًا.",
+      },
+      {
+        status: 404,
+      }
+    );
+  }
+
+  const selectedPlan =
+    planData as PlanRow;
+
+  const originalAmountCents =
+    Number(selectedPlan.price_cents);
+
+  const currency =
+    selectedPlan.currency
+      .trim()
+      .toUpperCase();
+
+  if (
+    !Number.isInteger(
+      originalAmountCents
+    ) ||
+    originalAmountCents <= 0
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "سعر الباقة غير صحيح.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  if (currency !== "EGP") {
+    return NextResponse.json(
+      {
+        error:
+          "عملة الباقة غير مدعومة حاليًا.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
 
   const {
     firstName,
@@ -299,9 +409,6 @@ export async function POST(
       .slice(0, 10)
       .toUpperCase();
 
-  const adminSupabase =
-    createAdminClient();
-
   const {
     data: paymentRecord,
     error: paymentInsertError,
@@ -312,14 +419,25 @@ export async function POST(
       provider: "paymob",
       plan_key: plan,
       status: "pending",
+
       amount_cents:
-        selectedPlan.amount,
-      currency: "EGP",
+        originalAmountCents,
+
+      original_amount_cents:
+        originalAmountCents,
+
+      discount_amount_cents: 0,
+
+      currency,
+
       special_reference:
         specialReference,
+
       customer_email: email,
+
       customer_phone:
         normalizedPhone,
+
       is_test: true,
       hmac_verified: false,
     })
@@ -346,7 +464,155 @@ export async function POST(
     );
   }
 
+  const paymentRecordId =
+    String(paymentRecord.id);
+
+  async function markPaymentFailed(
+    stage: string,
+    response?: unknown
+  ) {
+    await adminSupabase
+      .from("payment_transactions")
+      .update({
+        status: "failed",
+
+        raw_payload: {
+          stage,
+          response:
+            response ?? null,
+        },
+      })
+      .eq("id", paymentRecordId);
+
+    if (promoCode) {
+      await adminSupabase.rpc(
+        "finalize_promo_redemption",
+        {
+          p_special_reference:
+            specialReference,
+
+          p_success: false,
+        }
+      );
+    }
+  }
+
+  let finalAmountCents =
+    originalAmountCents;
+
+  let discountAmountCents = 0;
+
+  let appliedPromoCode = "";
+
+  if (promoCode) {
+    const {
+      data: promoReservationData,
+      error: promoReservationError,
+    } = await adminSupabase.rpc(
+      "reserve_promo_code",
+      {
+        p_code: promoCode,
+
+        p_user_id: userId,
+
+        p_plan_key: plan,
+
+        p_original_amount_cents:
+          originalAmountCents,
+
+        p_payment_transaction_id:
+          paymentRecordId,
+
+        p_special_reference:
+          specialReference,
+      }
+    );
+
+    const reservationValue =
+      Array.isArray(
+        promoReservationData
+      )
+        ? promoReservationData[0]
+        : promoReservationData;
+
+    const reservation =
+      reservationValue as
+        | PromoReservationRow
+        | null;
+
+    if (
+      promoReservationError ||
+      !reservation
+    ) {
+      console.error(
+        "Promo code reservation error:",
+        promoReservationError
+      );
+
+      await markPaymentFailed(
+        "promo_code_rejected",
+        promoReservationError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            getPromoErrorMessage(
+              promoReservationError
+                ?.message ||
+                "تعذر تطبيق كود الخصم."
+            ),
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    finalAmountCents = Number(
+      reservation.final_amount_cents
+    );
+
+    discountAmountCents = Number(
+      reservation.discount_amount_cents
+    );
+
+    appliedPromoCode =
+      reservation.normalized_code;
+
+    if (
+      !Number.isInteger(
+        finalAmountCents
+      ) ||
+      finalAmountCents <= 0 ||
+      !Number.isInteger(
+        discountAmountCents
+      ) ||
+      discountAmountCents <= 0
+    ) {
+      await markPaymentFailed(
+        "invalid_discount_result",
+        reservation
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر حساب قيمة الخصم.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+  }
+
   try {
+    const itemDescription =
+      appliedPromoCode
+        ? `${selectedPlan.description} - كود الخصم: ${appliedPromoCode}`
+        : selectedPlan.description;
+
     const paymobResponse = await fetch(
       "https://accept.paymob.com/v1/intention/",
       {
@@ -361,9 +627,9 @@ export async function POST(
         },
 
         body: JSON.stringify({
-          amount: selectedPlan.amount,
+          amount: finalAmountCents,
 
-          currency: "EGP",
+          currency,
 
           payment_methods: [
             environmentVariables.integrationId,
@@ -372,9 +638,13 @@ export async function POST(
           items: [
             {
               name: selectedPlan.name,
-              amount: selectedPlan.amount,
+
+              amount:
+                finalAmountCents,
+
               description:
-                selectedPlan.description,
+                itemDescription,
+
               quantity: 1,
             },
           ],
@@ -385,8 +655,10 @@ export async function POST(
             last_name: lastName,
             street: "NA",
             building: "NA",
+
             phone_number:
               normalizedPhone,
+
             city: "Cairo",
             country: "EG",
             email,
@@ -428,21 +700,16 @@ export async function POST(
         paymobData
       );
 
-      await adminSupabase
-        .from("payment_transactions")
-        .update({
-          status: "failed",
+      await markPaymentFailed(
+        "create_intention",
+        {
+          status:
+            paymobResponse.status,
 
-          raw_payload: {
-            stage:
-              "create_intention",
-            status:
-              paymobResponse.status,
-            response:
-              paymobData,
-          },
-        })
-        .eq("id", paymentRecord.id);
+          response:
+            paymobData,
+        }
+      );
 
       return NextResponse.json(
         {
@@ -462,19 +729,10 @@ export async function POST(
         : "";
 
     if (!clientSecret) {
-      await adminSupabase
-        .from("payment_transactions")
-        .update({
-          status: "failed",
-
-          raw_payload: {
-            stage:
-              "missing_client_secret",
-            response:
-              paymobData,
-          },
-        })
-        .eq("id", paymentRecord.id);
+      await markPaymentFailed(
+        "missing_client_secret",
+        paymobData
+      );
 
       return NextResponse.json(
         {
@@ -505,9 +763,22 @@ export async function POST(
 
           intention_id:
             paymobIntentionId,
+
+          original_amount_cents:
+            originalAmountCents,
+
+          discount_amount_cents:
+            discountAmountCents,
+
+          final_amount_cents:
+            finalAmountCents,
+
+          promo_code:
+            appliedPromoCode ||
+            null,
         },
       })
-      .eq("id", paymentRecord.id);
+      .eq("id", paymentRecordId);
 
     const checkoutUrl =
       "https://accept.paymob.com/unifiedcheckout/" +
@@ -520,8 +791,20 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
+
       checkoutUrl,
-      reference: specialReference,
+
+      reference:
+        specialReference,
+
+      originalAmountCents,
+
+      discountAmountCents,
+
+      finalAmountCents,
+
+      promoCode:
+        appliedPromoCode || null,
     });
   } catch (error) {
     console.error(
@@ -529,17 +812,9 @@ export async function POST(
       error
     );
 
-    await adminSupabase
-      .from("payment_transactions")
-      .update({
-        status: "failed",
-
-        raw_payload: {
-          stage:
-            "unexpected_error",
-        },
-      })
-      .eq("id", paymentRecord.id);
+    await markPaymentFailed(
+      "unexpected_error"
+    );
 
     return NextResponse.json(
       {
