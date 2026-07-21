@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+
 import {
   BookOpen,
   ChevronLeft,
@@ -8,6 +9,7 @@ import {
   ListVideo,
   Settings,
   ShieldCheck,
+  Tags,
   Users,
 } from "lucide-react";
 
@@ -23,6 +25,13 @@ const managementSections = [
       "إضافة الكورسات وتعديل بياناتها والتحكم في نشرها.",
     href: "/admin/courses",
     icon: BookOpen,
+  },
+  {
+    title: "إدارة التصنيفات",
+    description:
+      "إضافة تصنيفات الكورسات وتعديل ترتيبها والتحكم في ظهورها.",
+    href: "/admin/categories",
+    icon: Tags,
   },
   {
     title: "إدارة الدروس",
@@ -129,9 +138,9 @@ export default async function AdminPage() {
                 </h1>
 
                 <p className="mt-3 max-w-2xl leading-7 text-zinc-400">
-                  تحكم في الكورسات والدروس
-                  والطلاب والاشتراكات من مكان
-                  واحد.
+                  تحكم في الكورسات والتصنيفات
+                  والدروس والطلاب والاشتراكات
+                  من مكان واحد.
                 </p>
               </div>
             </div>
@@ -163,10 +172,11 @@ export default async function AdminPage() {
             </p>
           </div>
 
-          <div className="mt-10 grid gap-6 md:grid-cols-2">
+          <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
             {managementSections.map(
               (section) => {
-                const Icon = section.icon;
+                const Icon =
+                  section.icon;
 
                 return (
                   <Link
