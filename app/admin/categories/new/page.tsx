@@ -9,13 +9,24 @@ import {
 import {
   ArrowRight,
   BookOpen,
+  Brain,
+  Briefcase,
+  Building2,
+  Camera,
   CheckCircle2,
-  Clock3,
-  ImageIcon,
+  Clapperboard,
+  Code2,
+  GraduationCap,
+  Languages,
+  Laptop,
+  ListOrdered,
+  Music4,
+  Palette,
   Save,
   ShieldCheck,
+  ShoppingCart,
   Tag,
-  UserRound,
+  Tags,
 } from "lucide-react";
 
 import Navbar from "../../../../components/layout/Navbar";
@@ -29,10 +40,73 @@ type PageProps = {
   }>;
 };
 
-type CategoryOption = {
-  title: string;
-  is_published: boolean;
-};
+const iconOptions = [
+  {
+    value: "Code2",
+    label: "البرمجة",
+    icon: Code2,
+  },
+  {
+    value: "Languages",
+    label: "اللغات",
+    icon: Languages,
+  },
+  {
+    value: "Music4",
+    label: "الإنتاج الموسيقي",
+    icon: Music4,
+  },
+  {
+    value: "Palette",
+    label: "التصميم",
+    icon: Palette,
+  },
+  {
+    value: "Brain",
+    label: "الذكاء الاصطناعي",
+    icon: Brain,
+  },
+  {
+    value: "Briefcase",
+    label: "إدارة الأعمال",
+    icon: Briefcase,
+  },
+  {
+    value: "Camera",
+    label: "التصوير",
+    icon: Camera,
+  },
+  {
+    value: "Clapperboard",
+    label: "المونتاج",
+    icon: Clapperboard,
+  },
+  {
+    value: "ShoppingCart",
+    label: "التجارة الإلكترونية",
+    icon: ShoppingCart,
+  },
+  {
+    value: "Building2",
+    label: "التسويق العقاري",
+    icon: Building2,
+  },
+  {
+    value: "Laptop",
+    label: "صناعة المحتوى",
+    icon: Laptop,
+  },
+  {
+    value: "GraduationCap",
+    label: "التطوير الشخصي",
+    icon: GraduationCap,
+  },
+  {
+    value: "BookOpen",
+    label: "تعليم عام",
+    icon: BookOpen,
+  },
+];
 
 function getFormValue(
   formData: FormData,
@@ -47,17 +121,13 @@ function redirectWithError(
   message: string
 ): never {
   redirect(
-    `/admin/courses/new?error=${encodeURIComponent(
+    `/admin/categories/new?error=${encodeURIComponent(
       message
     )}`
   );
 }
 
-async function createCourse(
-  formData: FormData
-) {
-  "use server";
-
+async function requireAdmin() {
   const supabase =
     await createClient();
 
@@ -105,6 +175,17 @@ async function createCourse(
   ) {
     redirect("/dashboard");
   }
+
+  return supabase;
+}
+
+async function createCategory(
+  formData: FormData
+) {
+  "use server";
+
+  const supabase =
+    await requireAdmin();
 
   const title =
     getFormValue(
@@ -118,35 +199,26 @@ async function createCourse(
       "slug"
     ).toLowerCase();
 
-  const instructor =
-    getFormValue(
-      formData,
-      "instructor"
-    );
-
-  const category =
-    getFormValue(
-      formData,
-      "category"
-    );
-
   const description =
     getFormValue(
       formData,
       "description"
     );
 
-  const image =
+  const iconKey =
     getFormValue(
       formData,
-      "image"
+      "icon_key"
     );
 
-  const duration =
+  const sortOrderValue =
     getFormValue(
       formData,
-      "duration"
+      "sort_order"
     );
+
+  const sortOrder =
+    Number(sortOrderValue);
 
   const isPublished =
     formData.get(
@@ -156,44 +228,12 @@ async function createCourse(
   if (
     !title ||
     !slug ||
-    !instructor ||
-    !category ||
     !description ||
-    !image ||
-    !duration
+    !iconKey ||
+    !sortOrderValue
   ) {
     redirectWithError(
-      "اكتب جميع بيانات الكورس المطلوبة."
-    );
-  }
-
-  /*
-   * التأكد أن التصنيف موجود
-   * فعلًا داخل جدول التصنيفات.
-   */
-  const {
-    data: categoryRecord,
-    error: categoryError,
-  } = await supabase
-    .from("categories")
-    .select("id")
-    .eq("title", category)
-    .maybeSingle();
-
-  if (categoryError) {
-    console.error(
-      "تعذر التحقق من التصنيف:",
-      categoryError
-    );
-
-    redirectWithError(
-      "تعذر التحقق من التصنيف المختار."
-    );
-  }
-
-  if (!categoryRecord) {
-    redirectWithError(
-      "التصنيف المختار غير موجود."
+      "اكتب جميع بيانات التصنيف المطلوبة."
     );
   }
 
@@ -204,41 +244,48 @@ async function createCourse(
     !slugPattern.test(slug)
   ) {
     redirectWithError(
-      "رابط الكورس يجب أن يكون بالإنجليزية، مثل: data-science"
+      "رابط التصنيف يجب أن يكون بالإنجليزية، مثل: web-development"
     );
   }
 
   if (
-    !image.startsWith(
-      "/images/courses/"
-    )
+    !Number.isInteger(sortOrder) ||
+    sortOrder < 0
   ) {
     redirectWithError(
-      "مسار الصورة يجب أن يبدأ بـ /images/courses/"
+      "ترتيب التصنيف يجب أن يكون رقمًا صحيحًا يبدأ من صفر."
+    );
+  }
+
+  const validIcon =
+    iconOptions.some(
+      (option) =>
+        option.value === iconKey
+    );
+
+  if (!validIcon) {
+    redirectWithError(
+      "اختر أيقونة صحيحة للتصنيف."
     );
   }
 
   const {
     error: insertError,
   } = await supabase
-    .from("courses")
+    .from("categories")
     .insert({
-      slug,
       title,
-      instructor,
-      category,
+      slug,
       description,
-      image,
-      rating: 0,
-      students_count: 0,
-      duration,
-      lessons_count: 0,
-      is_published: isPublished,
+      icon_key: iconKey,
+      sort_order: sortOrder,
+      is_published:
+        isPublished,
     });
 
   if (insertError) {
     console.error(
-      "تعذر إضافة الكورس:",
+      "تعذر إضافة التصنيف:",
       insertError
     );
 
@@ -246,130 +293,41 @@ async function createCourse(
       insertError.code === "23505"
     ) {
       redirectWithError(
-        "رابط الكورس مستخدم بالفعل. اختر رابطًا مختلفًا."
+        "اسم التصنيف أو رابطه مستخدم بالفعل."
       );
     }
 
     redirectWithError(
-      "تعذر إضافة الكورس. حاول مرة أخرى."
+      "تعذر إضافة التصنيف. حاول مرة أخرى."
     );
   }
 
   revalidatePath(
-    "/admin/courses"
-  );
-
-  revalidatePath(
-    "/courses"
+    "/admin/categories"
   );
 
   revalidatePath(
     "/categories"
   );
 
+  revalidatePath(
+    "/courses"
+  );
+
   revalidatePath("/");
 
-  redirect("/admin/courses");
+  redirect(
+    "/admin/categories?success=" +
+      encodeURIComponent(
+        "تم إضافة التصنيف بنجاح."
+      )
+  );
 }
 
-export default async function NewCoursePage({
+export default async function NewCategoryPage({
   searchParams,
 }: PageProps) {
-  const supabase =
-    await createClient();
-
-  const {
-    data: claimsData,
-    error: claimsError,
-  } =
-    await supabase.auth.getClaims();
-
-  if (
-    claimsError ||
-    !claimsData?.claims
-  ) {
-    redirect("/login");
-  }
-
-  const claims =
-    claimsData.claims as Record<
-      string,
-      unknown
-    >;
-
-  const userId =
-    typeof claims.sub === "string"
-      ? claims.sub
-      : "";
-
-  if (!userId) {
-    redirect("/login");
-  }
-
-  const {
-    data: profile,
-    error: profileError,
-  } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (
-    profileError ||
-    !profile ||
-    profile.role !== "admin"
-  ) {
-    redirect("/dashboard");
-  }
-
-  /*
-   * تحميل التصنيفات مباشرة
-   * من Supabase بدل القائمة الثابتة.
-   */
-  const {
-    data: categoriesData,
-    error: categoriesError,
-  } = await supabase
-    .from("categories")
-    .select(
-      `
-        title,
-        is_published
-      `
-    )
-    .order("sort_order", {
-      ascending: true,
-    })
-    .order("title", {
-      ascending: true,
-    });
-
-  if (categoriesError) {
-    console.error(
-      "تعذر تحميل التصنيفات:",
-      categoriesError
-    );
-  }
-
-  const categories: CategoryOption[] =
-    categoriesError
-      ? []
-      : (
-          categoriesData ?? []
-        ).map((category) => ({
-          title: String(
-            category.title
-          ),
-
-          is_published: Boolean(
-            category.is_published
-          ),
-        }));
-
-  const canCreateCourse =
-    !categoriesError &&
-    categories.length > 0;
+  await requireAdmin();
 
   const {
     error,
@@ -388,18 +346,16 @@ export default async function NewCoursePage({
 
         <div className="relative mx-auto max-w-7xl">
           <Link
-            href="/admin/courses"
+            href="/admin/categories"
             className="inline-flex items-center gap-2 text-sm font-bold text-zinc-400 transition hover:text-purple-400"
           >
             <ArrowRight size={17} />
-            العودة إلى إدارة الكورسات
+            العودة إلى إدارة التصنيفات
           </Link>
 
           <div className="mt-7 flex items-center gap-5">
             <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-600 shadow-lg shadow-purple-950/40">
-              <ShieldCheck
-                size={31}
-              />
+              <ShieldCheck size={31} />
             </div>
 
             <div>
@@ -408,13 +364,12 @@ export default async function NewCoursePage({
               </p>
 
               <h1 className="mt-2 text-3xl font-black md:text-5xl">
-                إضافة كورس جديد
+                إضافة تصنيف جديد
               </h1>
 
               <p className="mt-3 max-w-2xl leading-7 text-zinc-400">
-                أدخل بيانات الكورس الأساسية،
-                وبعد إنشائه سنضيف الدروس
-                والفيديوهات والملفات.
+                أضف تصنيفًا جديدًا لتنظيم
+                الكورسات داخل المنصة.
               </p>
             </div>
           </div>
@@ -429,7 +384,7 @@ export default async function NewCoursePage({
           >
             <div>
               <p className="text-sm font-bold text-purple-400">
-                بيانات الكورس
+                بيانات التصنيف
               </p>
 
               <h2 className="mt-2 text-2xl font-black md:text-3xl">
@@ -437,8 +392,8 @@ export default async function NewCoursePage({
               </h2>
 
               <p className="mt-3 text-sm leading-7 text-zinc-500">
-                الحقول المكتوب بجوارها مطلوب
-                يجب إدخالها قبل الحفظ.
+                أدخل اسم التصنيف ووصفه
+                ورابطه وترتيبه داخل المنصة.
               </p>
             </div>
 
@@ -451,30 +406,8 @@ export default async function NewCoursePage({
               </div>
             )}
 
-            {categoriesError && (
-              <div
-                role="alert"
-                className="mt-7 rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm font-bold leading-7 text-red-300"
-              >
-                تعذر تحميل التصنيفات من
-                قاعدة البيانات.
-              </div>
-            )}
-
-            {!categoriesError &&
-              categories.length === 0 && (
-                <div
-                  role="alert"
-                  className="mt-7 rounded-2xl border border-orange-500/20 bg-orange-500/10 px-5 py-4 text-sm font-bold leading-7 text-orange-300"
-                >
-                  لا توجد تصنيفات متاحة.
-                  أضف تصنيفًا أولًا من لوحة
-                  الإدارة.
-                </div>
-              )}
-
             <form
-              action={createCourse}
+              action={createCategory}
               className="mt-8 space-y-7"
             >
               <div className="grid gap-6 md:grid-cols-2">
@@ -483,15 +416,14 @@ export default async function NewCoursePage({
                     htmlFor="title"
                     className="mb-3 block text-sm font-bold text-zinc-300"
                   >
-                    اسم الكورس
-
+                    اسم التصنيف
                     <span className="mr-1 text-red-400">
                       *
                     </span>
                   </label>
 
                   <div className="flex items-center rounded-xl border border-white/10 bg-black/20 px-4 transition focus-within:border-purple-500/60">
-                    <BookOpen
+                    <Tags
                       size={19}
                       className="shrink-0 text-zinc-600"
                     />
@@ -501,7 +433,7 @@ export default async function NewCoursePage({
                       name="title"
                       type="text"
                       required
-                      placeholder="مثال: احتراف تحليل البيانات"
+                      placeholder="مثال: الأمن السيبراني"
                       className="w-full bg-transparent px-3 py-4 outline-none placeholder:text-zinc-700"
                     />
                   </div>
@@ -512,8 +444,7 @@ export default async function NewCoursePage({
                     htmlFor="slug"
                     className="mb-3 block text-sm font-bold text-zinc-300"
                   >
-                    رابط الكورس
-
+                    رابط التصنيف
                     <span className="mr-1 text-red-400">
                       *
                     </span>
@@ -534,7 +465,7 @@ export default async function NewCoursePage({
                       type="text"
                       required
                       pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
-                      placeholder="data-analysis"
+                      placeholder="cyber-security"
                       className="w-full bg-transparent px-3 py-4 text-left outline-none placeholder:text-zinc-700"
                     />
                   </div>
@@ -547,80 +478,40 @@ export default async function NewCoursePage({
 
                 <div>
                   <label
-                    htmlFor="instructor"
+                    htmlFor="icon_key"
                     className="mb-3 block text-sm font-bold text-zinc-300"
                   >
-                    اسم مقدم الكورس
-
-                    <span className="mr-1 text-red-400">
-                      *
-                    </span>
-                  </label>
-
-                  <div className="flex items-center rounded-xl border border-white/10 bg-black/20 px-4 transition focus-within:border-purple-500/60">
-                    <UserRound
-                      size={19}
-                      className="shrink-0 text-zinc-600"
-                    />
-
-                    <input
-                      id="instructor"
-                      name="instructor"
-                      type="text"
-                      required
-                      defaultValue="Infinity Academy"
-                      placeholder="اسم مقدم الكورس"
-                      className="w-full bg-transparent px-3 py-4 outline-none placeholder:text-zinc-700"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="category"
-                    className="mb-3 block text-sm font-bold text-zinc-300"
-                  >
-                    التصنيف
-
+                    أيقونة التصنيف
                     <span className="mr-1 text-red-400">
                       *
                     </span>
                   </label>
 
                   <select
-                    id="category"
-                    name="category"
+                    id="icon_key"
+                    name="icon_key"
                     required
                     defaultValue=""
-                    disabled={
-                      !canCreateCourse
-                    }
-                    className="w-full rounded-xl border border-white/10 bg-[#111114] px-4 py-4 text-white outline-none transition focus:border-purple-500/60 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full rounded-xl border border-white/10 bg-[#111114] px-4 py-4 text-white outline-none transition focus:border-purple-500/60"
                   >
                     <option
                       value=""
                       disabled
                     >
-                      {canCreateCourse
-                        ? "اختر تصنيف الكورس"
-                        : "لا توجد تصنيفات متاحة"}
+                      اختر أيقونة التصنيف
                     </option>
 
-                    {categories.map(
-                      (category) => (
+                    {iconOptions.map(
+                      (option) => (
                         <option
                           key={
-                            category.title
+                            option.value
                           }
                           value={
-                            category.title
+                            option.value
                           }
                         >
-                          {category.title}
-
-                          {!category.is_published
-                            ? " — مخفي"
-                            : ""}
+                          {option.label}
                         </option>
                       )
                     )}
@@ -629,61 +520,31 @@ export default async function NewCoursePage({
 
                 <div>
                   <label
-                    htmlFor="duration"
+                    htmlFor="sort_order"
                     className="mb-3 block text-sm font-bold text-zinc-300"
                   >
-                    مدة الكورس
-
+                    ترتيب التصنيف
                     <span className="mr-1 text-red-400">
                       *
                     </span>
                   </label>
 
                   <div className="flex items-center rounded-xl border border-white/10 bg-black/20 px-4 transition focus-within:border-purple-500/60">
-                    <Clock3
+                    <ListOrdered
                       size={19}
                       className="shrink-0 text-zinc-600"
                     />
 
                     <input
-                      id="duration"
-                      name="duration"
-                      type="text"
+                      id="sort_order"
+                      name="sort_order"
+                      type="number"
                       required
-                      placeholder="مثال: 30 ساعة"
+                      min="0"
+                      step="1"
+                      defaultValue="0"
+                      placeholder="0"
                       className="w-full bg-transparent px-3 py-4 outline-none placeholder:text-zinc-700"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="image"
-                    className="mb-3 block text-sm font-bold text-zinc-300"
-                  >
-                    مسار صورة الكورس
-
-                    <span className="mr-1 text-red-400">
-                      *
-                    </span>
-                  </label>
-
-                  <div
-                    dir="ltr"
-                    className="flex items-center rounded-xl border border-white/10 bg-black/20 px-4 transition focus-within:border-purple-500/60"
-                  >
-                    <ImageIcon
-                      size={19}
-                      className="shrink-0 text-zinc-600"
-                    />
-
-                    <input
-                      id="image"
-                      name="image"
-                      type="text"
-                      required
-                      placeholder="/images/courses/data-analysis.jpg"
-                      className="w-full bg-transparent px-3 py-4 text-left outline-none placeholder:text-zinc-700"
                     />
                   </div>
                 </div>
@@ -694,8 +555,7 @@ export default async function NewCoursePage({
                   htmlFor="description"
                   className="mb-3 block text-sm font-bold text-zinc-300"
                 >
-                  وصف الكورس
-
+                  وصف التصنيف
                   <span className="mr-1 text-red-400">
                     *
                   </span>
@@ -705,8 +565,8 @@ export default async function NewCoursePage({
                   id="description"
                   name="description"
                   required
-                  rows={6}
-                  placeholder="اكتب وصفًا واضحًا يشرح محتوى الكورس وما سيتعلمه الطالب..."
+                  rows={5}
+                  placeholder="اكتب وصفًا مختصرًا يوضح محتوى التصنيف..."
                   className="w-full resize-none rounded-2xl border border-white/10 bg-black/20 px-5 py-4 leading-8 outline-none transition placeholder:text-zinc-700 focus:border-purple-500/60"
                 />
               </div>
@@ -715,25 +575,25 @@ export default async function NewCoursePage({
                 <input
                   type="checkbox"
                   name="is_published"
+                  defaultChecked
                   className="mt-1 h-5 w-5 accent-purple-600"
                 />
 
                 <div>
                   <p className="font-black">
-                    نشر الكورس مباشرة
+                    نشر التصنيف مباشرة
                   </p>
 
                   <p className="mt-2 text-sm leading-7 text-zinc-500">
-                    عند تفعيل هذا الاختيار
-                    سيظهر الكورس للطلاب بعد
-                    حفظه.
+                    عند تفعيل هذا الاختيار سيظهر
+                    التصنيف للطلاب بعد حفظه.
                   </p>
                 </div>
               </label>
 
               <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-7 sm:flex-row sm:justify-end">
                 <Link
-                  href="/admin/courses"
+                  href="/admin/categories"
                   className="inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 px-7 py-4 font-bold text-zinc-300 transition hover:border-purple-500/50 hover:bg-purple-500/10 hover:text-white"
                 >
                   إلغاء
@@ -741,13 +601,10 @@ export default async function NewCoursePage({
 
                 <button
                   type="submit"
-                  disabled={
-                    !canCreateCourse
-                  }
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-7 py-4 font-black text-white shadow-lg shadow-purple-950/40 transition hover:scale-[1.02] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-7 py-4 font-black text-white shadow-lg shadow-purple-950/40 transition hover:scale-[1.02] hover:brightness-110"
                 >
                   <Save size={20} />
-                  حفظ الكورس
+                  حفظ التصنيف
                 </button>
               </div>
             </form>
@@ -759,29 +616,27 @@ export default async function NewCoursePage({
               className="border-purple-500/20 bg-purple-500/[0.05] p-7"
             >
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400">
-                <CheckCircle2
-                  size={24}
-                />
+                <CheckCircle2 size={24} />
               </div>
 
               <h2 className="mt-5 text-xl font-black">
-                بعد إضافة الكورس
+                بعد إضافة التصنيف
               </h2>
 
               <div className="mt-5 space-y-4 text-sm leading-7 text-zinc-400">
                 <p>
-                  1. سنفتح صفحة تعديل بيانات
-                  الكورس.
+                  1. سيظهر في صفحة إدارة
+                  التصنيفات.
                 </p>
 
                 <p>
-                  2. سنضيف الدروس ونرتب
-                  الأقسام.
+                  2. يمكن استخدامه عند إضافة
+                  الكورسات.
                 </p>
 
                 <p>
-                  3. سنضيف روابط الفيديوهات
-                  والملفات.
+                  3. سيظهر للطلاب عند ربط
+                  الصفحة بقاعدة البيانات.
                 </p>
               </div>
             </GlassCard>
@@ -791,31 +646,22 @@ export default async function NewCoursePage({
               className="p-7"
             >
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
-                <ImageIcon
-                  size={24}
-                />
+                <ListOrdered size={24} />
               </div>
 
               <h2 className="mt-5 text-xl font-black">
-                صورة الكورس
+                ترتيب التصنيفات
               </h2>
 
               <p className="mt-3 text-sm leading-7 text-zinc-400">
-                ضع الصورة داخل:
+                الرقم الأصغر يظهر أولًا داخل
+                صفحة التصنيفات.
               </p>
 
-              <code
-                dir="ltr"
-                className="mt-4 block overflow-x-auto rounded-xl border border-white/10 bg-black/30 p-4 text-left text-xs text-purple-300"
-              >
-                public/images/courses/
-              </code>
-
-              <p className="mt-4 text-sm leading-7 text-zinc-500">
-                واكتب مسارها في النموذج
-                بداية من
-                /images/courses/
-              </p>
+              <div className="mt-5 rounded-xl border border-white/10 bg-black/30 p-4 text-sm leading-7 text-zinc-500">
+                مثال: التصنيف رقم 1 يظهر قبل
+                التصنيف رقم 2.
+              </div>
             </GlassCard>
           </aside>
         </div>
