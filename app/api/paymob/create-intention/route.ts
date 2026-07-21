@@ -101,24 +101,20 @@ function getEnvironmentVariables() {
   const cardIntegrationIdValue =
     process.env.PAYMOB_INTEGRATION_ID?.trim();
 
-  const walletIntegrationIdValue =
-    process.env
-      .PAYMOB_WALLET_INTEGRATION_ID
-      ?.trim();
-
   const cardIntegrationId = Number(
     cardIntegrationIdValue
   );
 
   const walletIntegrationId = Number(
-    walletIntegrationIdValue
+    process.env
+      .PAYMOB_WALLET_INTEGRATION_ID
+      ?.trim() || "5790899"
   );
 
   if (
     !secretKey ||
     !publicKey ||
     !cardIntegrationIdValue ||
-    !walletIntegrationIdValue ||
     !Number.isInteger(
       cardIntegrationId
     ) ||
@@ -259,7 +255,9 @@ export async function POST(
 
   const email =
     typeof body.email === "string"
-      ? body.email.trim().toLowerCase()
+      ? body.email
+          .trim()
+          .toLowerCase()
       : "";
 
   const phone =
@@ -630,6 +628,14 @@ export async function POST(
         ? `${selectedPlan.description} - كود الخصم: ${appliedPromoCode}`
         : selectedPlan.description;
 
+    const paymentMethods = [
+      environmentVariables
+        .cardIntegrationId,
+
+      environmentVariables
+        .walletIntegrationId,
+    ];
+
     const paymobResponse = await fetch(
       "https://accept.paymob.com/v1/intention/",
       {
@@ -648,13 +654,8 @@ export async function POST(
 
           currency,
 
-          payment_methods: [
-            environmentVariables
-              .cardIntegrationId,
-
-            environmentVariables
-              .walletIntegrationId,
-          ],
+          payment_methods:
+            paymentMethods,
 
           items: [
             {
@@ -798,13 +799,8 @@ export async function POST(
             appliedPromoCode ||
             null,
 
-          payment_methods: [
-            environmentVariables
-              .cardIntegrationId,
-
-            environmentVariables
-              .walletIntegrationId,
-          ],
+          payment_methods:
+            paymentMethods,
         },
       })
       .eq("id", paymentRecordId);

@@ -13,7 +13,10 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type JsonRecord = Record<string, unknown>;
+type JsonRecord = Record<
+  string,
+  unknown
+>;
 
 type PaymentRecord = {
   id: string;
@@ -72,8 +75,9 @@ function toBoolean(
 
   if (typeof value === "string") {
     return (
-      value.trim().toLowerCase() ===
-      "true"
+      value
+        .trim()
+        .toLowerCase() === "true"
     );
   }
 
@@ -602,12 +606,14 @@ export async function POST(
     Number(
       process.env
         .PAYMOB_INTEGRATION_ID
+        ?.trim()
     );
 
   const walletIntegrationId =
     Number(
       process.env
         .PAYMOB_WALLET_INTEGRATION_ID
+        ?.trim() || "5790899"
     );
 
   if (
