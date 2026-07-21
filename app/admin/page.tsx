@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Tags,
   Users,
+  UsersRound,
 } from "lucide-react";
 
 import Navbar from "../../components/layout/Navbar";
@@ -32,6 +33,13 @@ const managementSections = [
       "إضافة تصنيفات الكورسات وتعديل ترتيبها والتحكم في ظهورها.",
     href: "/admin/categories",
     icon: Tags,
+  },
+  {
+    title: "إدارة فرق التدريس",
+    description:
+      "إضافة الفرق التعليمية وتعديل تخصصاتها ومهاراتها والتحكم في ظهورها.",
+    href: "/admin/instructor-teams",
+    icon: UsersRound,
   },
   {
     title: "إدارة الدروس",
@@ -139,8 +147,8 @@ export default async function AdminPage() {
 
                 <p className="mt-3 max-w-2xl leading-7 text-zinc-400">
                   تحكم في الكورسات والتصنيفات
-                  والدروس والطلاب والاشتراكات
-                  من مكان واحد.
+                  وفرق التدريس والدروس والطلاب
+                  والاشتراكات من مكان واحد.
                 </p>
               </div>
             </div>
