@@ -1,4 +1,4 @@
-import {
+﻿import {
   createHmac,
   timingSafeEqual,
 } from "node:crypto";
@@ -498,7 +498,7 @@ async function findPaymentRecord(
 
   if (
     data &&
-    data.length === 1
+    data.length >= 1
   ) {
     return data[0] as PaymentRecord;
   }
@@ -516,16 +516,33 @@ export async function GET(
     process.env.PAYMOB_HMAC
       ?.trim();
 
-  const expectedIntegrationId =
+  const cardIntegrationId =
     Number(
       process.env
         .PAYMOB_INTEGRATION_ID
+        ?.trim() || "5786780"
     );
+
+  const walletIntegrationId =
+    Number(
+      process.env
+        .PAYMOB_WALLET_INTEGRATION_ID
+        ?.trim() || "5790899"
+    );
+
+  const allowedIntegrationIds = [
+    cardIntegrationId,
+    walletIntegrationId,
+  ];
 
   if (
     !hmacSecret ||
-    !Number.isInteger(
-      expectedIntegrationId
+    allowedIntegrationIds.some(
+      (integrationId) =>
+        !Number.isInteger(
+          integrationId
+        ) ||
+        integrationId <= 0
     )
   ) {
     resultUrl.searchParams.set(
@@ -640,8 +657,9 @@ export async function GET(
   }
 
   if (
-    callbackIntegrationId !==
-    expectedIntegrationId
+    !allowedIntegrationIds.includes(
+      callbackIntegrationId
+    )
   ) {
     resultUrl.searchParams.set(
       "verified",
@@ -855,6 +873,42 @@ export async function GET(
       resultUrl.searchParams.set(
         "verification_error",
         "database_update_failed"
+      );
+
+      return NextResponse.redirect(
+        resultUrl,
+        303
+      );
+    }
+
+    const {
+      error: promoFinalizeError,
+    } = await adminSupabase.rpc(
+      "finalize_promo_redemption",
+      {
+        p_special_reference:
+          paymentRecord
+            .special_reference,
+
+        p_success:
+          isSuccessful,
+      }
+    );
+
+    if (promoFinalizeError) {
+      console.error(
+        "Promo redemption finalization error:",
+        promoFinalizeError
+      );
+
+      resultUrl.searchParams.set(
+        "verified",
+        "false"
+      );
+
+      resultUrl.searchParams.set(
+        "verification_error",
+        "promo_update_failed"
       );
 
       return NextResponse.redirect(
