@@ -51,9 +51,6 @@ type LessonRecord = {
   title: string;
   description: string | null;
   duration_minutes: number;
-  video_url: string | null;
-  summary_file_url: string | null;
-  resources_file_url: string | null;
 };
 
 type LessonProgressRecord = {
@@ -75,25 +72,42 @@ type CompleteLessonResult = {
   total_lessons: number;
 };
 
+type LessonContentLinks = {
+  videoUrl: string | null;
+  summaryUrl: string | null;
+  resourcesUrl: string | null;
+};
+
 function calculateProgress(
   completedLessons: number,
   totalLessons: number
 ) {
-  if (totalLessons <= 0 || completedLessons <= 0) {
+  if (
+    totalLessons <= 0 ||
+    completedLessons <= 0
+  ) {
     return 0;
   }
 
-  if (completedLessons >= totalLessons) {
+  if (
+    completedLessons >= totalLessons
+  ) {
     return 100;
   }
 
   return Math.max(
     1,
-    Math.round((completedLessons / totalLessons) * 100)
+    Math.round(
+      (completedLessons /
+        totalLessons) *
+        100
+    )
   );
 }
 
-function formatDuration(minutes: number) {
+function formatDuration(
+  minutes: number
+) {
   if (minutes === 1) {
     return "دقيقة واحدة";
   }
@@ -102,19 +116,32 @@ function formatDuration(minutes: number) {
     return "دقيقتان";
   }
 
-  if (minutes >= 3 && minutes <= 10) {
+  if (
+    minutes >= 3 &&
+    minutes <= 10
+  ) {
     return `${minutes} دقائق`;
   }
 
   return `${minutes} دقيقة`;
 }
 
-function getAccessErrorMessage(message?: string) {
-  if (message?.includes("اشتراك فعال")) {
+function getAccessErrorMessage(
+  message?: string
+) {
+  if (
+    message?.includes(
+      "اشتراك فعال"
+    )
+  ) {
     return "يجب أن يكون لديك اشتراك فعال لفتح هذا الكورس.";
   }
 
-  if (message?.includes("تسجيل الدخول")) {
+  if (
+    message?.includes(
+      "تسجيل الدخول"
+    )
+  ) {
     return "يجب تسجيل الدخول أولًا لفتح الكورس.";
   }
 
@@ -129,32 +156,87 @@ function getAccessErrorMessage(message?: string) {
 }
 
 export default function LearnPage() {
-  const params = useParams<{ slug: string }>();
+  const params =
+    useParams<{
+      slug: string;
+    }>();
+
   const router = useRouter();
 
-  const supabase = useMemo(() => createClient(), []);
-  const slug = params.slug;
-
-  const [course, setCourse] = useState<CourseRecord | null>(
-    null
-  );
-  const [lessons, setLessons] = useState<LessonRecord[]>(
+  const supabase = useMemo(
+    () => createClient(),
     []
   );
+
+  const slug = params.slug;
+
+  const [
+    course,
+    setCourse,
+  ] = useState<CourseRecord | null>(
+    null
+  );
+
+  const [
+    lessons,
+    setLessons,
+  ] = useState<LessonRecord[]>([]);
+
   const [
     completedLessonIds,
     setCompletedLessonIds,
   ] = useState<string[]>([]);
-  const [activeLessonId, setActiveLessonId] =
-    useState("");
-  const [enrollmentStatus, setEnrollmentStatus] =
-    useState<EnrollmentStatus>("active");
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSavingProgress, setIsSavingProgress] =
-    useState(false);
-  const [loadError, setLoadError] = useState("");
-  const [progressError, setProgressError] =
-    useState("");
+
+  const [
+    activeLessonId,
+    setActiveLessonId,
+  ] = useState("");
+
+  const [
+    enrollmentStatus,
+    setEnrollmentStatus,
+  ] =
+    useState<EnrollmentStatus>(
+      "active"
+    );
+
+  const [
+    isLoading,
+    setIsLoading,
+  ] = useState(true);
+
+  const [
+    isSavingProgress,
+    setIsSavingProgress,
+  ] = useState(false);
+
+  const [
+    loadError,
+    setLoadError,
+  ] = useState("");
+
+  const [
+    progressError,
+    setProgressError,
+  ] = useState("");
+
+  const [
+    lessonContent,
+    setLessonContent,
+  ] =
+    useState<LessonContentLinks | null>(
+      null
+    );
+
+  const [
+    isContentLoading,
+    setIsContentLoading,
+  ] = useState(false);
+
+  const [
+    contentError,
+    setContentError,
+  ] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -167,102 +249,140 @@ export default function LearnPage() {
       const {
         data: { user },
         error: userError,
-      } = await supabase.auth.getUser();
+      } =
+        await supabase.auth.getUser();
 
       if (!isMounted) {
         return;
       }
 
-      if (userError || !user) {
+      if (
+        userError ||
+        !user
+      ) {
         router.replace("/login");
         router.refresh();
         return;
       }
 
-      const { data: courseData, error: courseError } =
-        await supabase
-          .from("courses")
-          .select(
-            `
-              id,
-              slug,
-              title,
-              instructor,
-              category,
-              description,
-              image,
-              rating,
-              students_count,
-              duration,
-              lessons_count
-            `
-          )
-          .eq("slug", slug)
-          .maybeSingle();
+      const {
+        data: courseData,
+        error: courseError,
+      } = await supabase
+        .from("courses")
+        .select(
+          `
+            id,
+            slug,
+            title,
+            instructor,
+            category,
+            description,
+            image,
+            rating,
+            students_count,
+            duration,
+            lessons_count
+          `
+        )
+        .eq("slug", slug)
+        .maybeSingle();
 
       if (!isMounted) {
         return;
       }
 
-      if (courseError || !courseData) {
+      if (
+        courseError ||
+        !courseData
+      ) {
         console.error(
           "تعذر تحميل الكورس:",
           courseError
         );
+
         setLoadError(
           "لم نتمكن من العثور على هذا الكورس."
         );
+
         setIsLoading(false);
         return;
       }
 
-      const formattedCourse: CourseRecord = {
-        id: String(courseData.id),
-        slug: String(courseData.slug),
-        title: String(courseData.title),
-        instructor: String(courseData.instructor),
-        category: String(courseData.category),
-        description:
-          courseData.description === null
-            ? null
-            : String(courseData.description),
-        image: String(courseData.image),
-        rating: Number(courseData.rating),
-        students_count: Number(
-          courseData.students_count
-        ),
-        duration: String(courseData.duration),
-        lessons_count: Number(courseData.lessons_count),
-      };
+      const formattedCourse: CourseRecord =
+        {
+          id: String(
+            courseData.id
+          ),
+          slug: String(
+            courseData.slug
+          ),
+          title: String(
+            courseData.title
+          ),
+          instructor: String(
+            courseData.instructor
+          ),
+          category: String(
+            courseData.category
+          ),
+          description:
+            courseData.description ===
+            null
+              ? null
+              : String(
+                  courseData.description
+                ),
+          image: String(
+            courseData.image
+          ),
+          rating: Number(
+            courseData.rating
+          ),
+          students_count: Number(
+            courseData.students_count
+          ),
+          duration: String(
+            courseData.duration
+          ),
+          lessons_count: Number(
+            courseData.lessons_count
+          ),
+        };
 
-      /*
-       * الدالة الآمنة تتحقق من وجود اشتراك فعال،
-       * أو وصول يدوي من الإدارة، ثم تنشئ/تحدّث
-       * تسجيل الكورس من داخل قاعدة البيانات.
-       */
-      const { error: ensureEnrollmentError } =
-        await supabase.rpc(
-          "ensure_course_enrollment",
-          {
-            p_course_id: formattedCourse.id,
-          }
-        );
+      const {
+        error:
+          ensureEnrollmentError,
+      } = await supabase.rpc(
+        "ensure_course_enrollment",
+        {
+          p_course_id:
+            formattedCourse.id,
+        }
+      );
 
       if (!isMounted) {
         return;
       }
 
-      if (ensureEnrollmentError) {
+      if (
+        ensureEnrollmentError
+      ) {
         console.error(
           "تعذر التحقق من صلاحية دخول الكورس:",
           ensureEnrollmentError
         );
-        setCourse(formattedCourse);
+
+        setCourse(
+          formattedCourse
+        );
+
         setLoadError(
           getAccessErrorMessage(
             ensureEnrollmentError.message
           )
         );
+
         setIsLoading(false);
         return;
       }
@@ -280,53 +400,75 @@ export default function LearnPage() {
             completed_at
           `
         )
-        .eq("user_id", user.id)
-        .eq("course_id", formattedCourse.id)
+        .eq(
+          "user_id",
+          user.id
+        )
+        .eq(
+          "course_id",
+          formattedCourse.id
+        )
         .maybeSingle();
 
       if (!isMounted) {
         return;
       }
 
-      if (enrollmentError || !enrollmentData) {
+      if (
+        enrollmentError ||
+        !enrollmentData
+      ) {
         console.error(
           "تعذر تحميل تسجيل الكورس:",
           enrollmentError
         );
-        setCourse(formattedCourse);
+
+        setCourse(
+          formattedCourse
+        );
+
         setLoadError(
           "تعذر تحميل تسجيلك داخل هذا الكورس."
         );
+
         setIsLoading(false);
         return;
       }
 
-      const { data: lessonsData, error: lessonsError } =
-        await supabase
-          .from("lessons")
-          .select(
-            `
-              id,
-              course_id,
-              position,
-              section_title,
-              section_position,
-              title,
-              description,
-              duration_minutes,
-              video_url,
-              summary_file_url,
-              resources_file_url
-            `
-          )
-          .eq("course_id", formattedCourse.id)
-          .eq("is_published", true)
-          .order("section_position", {
+      const {
+        data: lessonsData,
+        error: lessonsError,
+      } = await supabase
+        .from("lessons")
+        .select(
+          `
+            id,
+            course_id,
+            position,
+            section_title,
+            section_position,
+            title,
+            description,
+            duration_minutes
+          `
+        )
+        .eq(
+          "course_id",
+          formattedCourse.id
+        )
+        .eq(
+          "is_published",
+          true
+        )
+        .order(
+          "section_position",
+          {
             ascending: true,
-          })
-          .order("position", {
-            ascending: true,
-          });
+          }
+        )
+        .order("position", {
+          ascending: true,
+        });
 
       if (!isMounted) {
         return;
@@ -341,52 +483,63 @@ export default function LearnPage() {
           "تعذر تحميل دروس الكورس:",
           lessonsError
         );
-        setCourse(formattedCourse);
+
+        setCourse(
+          formattedCourse
+        );
+
         setLoadError(
           "لم تتم إضافة دروس منشورة لهذا الكورس حتى الآن."
         );
+
         setIsLoading(false);
         return;
       }
 
       const formattedLessons: LessonRecord[] =
-        lessonsData.map((lesson) => ({
-          id: String(lesson.id),
-          course_id: String(lesson.course_id),
-          position: Number(lesson.position),
-          section_title: String(lesson.section_title),
-          section_position: Number(
-            lesson.section_position
-          ),
-          title: String(lesson.title),
-          description:
-            lesson.description === null
-              ? null
-              : String(lesson.description),
-          duration_minutes: Number(
-            lesson.duration_minutes
-          ),
-          video_url:
-            lesson.video_url === null
-              ? null
-              : String(lesson.video_url),
-          summary_file_url:
-            lesson.summary_file_url === null
-              ? null
-              : String(lesson.summary_file_url),
-          resources_file_url:
-            lesson.resources_file_url === null
-              ? null
-              : String(lesson.resources_file_url),
-        }));
+        lessonsData.map(
+          (lesson) => ({
+            id: String(
+              lesson.id
+            ),
+            course_id: String(
+              lesson.course_id
+            ),
+            position: Number(
+              lesson.position
+            ),
+            section_title: String(
+              lesson.section_title
+            ),
+            section_position: Number(
+              lesson.section_position
+            ),
+            title: String(
+              lesson.title
+            ),
+            description:
+              lesson.description ===
+              null
+                ? null
+                : String(
+                    lesson.description
+                  ),
+            duration_minutes: Number(
+              lesson.duration_minutes
+            ),
+          })
+        );
 
-      const lessonIds = formattedLessons.map(
-        (lesson) => lesson.id
-      );
+      const lessonIds =
+        formattedLessons.map(
+          (lesson) =>
+            lesson.id
+        );
 
       const {
         data: progressData,
-        error: progressLoadError,
+        error:
+          progressLoadError,
       } = await supabase
         .from("lesson_progress")
         .select(
@@ -395,58 +548,109 @@ export default function LearnPage() {
             completed
           `
         )
-        .eq("user_id", user.id)
-        .in("lesson_id", lessonIds);
+        .eq(
+          "user_id",
+          user.id
+        )
+        .in(
+          "lesson_id",
+          lessonIds
+        );
 
       if (!isMounted) {
         return;
       }
 
-      if (progressLoadError) {
+      if (
+        progressLoadError
+      ) {
         console.error(
           "تعذر تحميل تقدم الدروس:",
           progressLoadError
         );
-        setCourse(formattedCourse);
+
+        setCourse(
+          formattedCourse
+        );
+
         setLoadError(
           "تعذر تحميل تقدمك داخل الكورس."
         );
+
         setIsLoading(false);
         return;
       }
 
-      const progressRows: LessonProgressRecord[] = (
-        progressData ?? []
-      ).map((progress) => ({
-        lesson_id: String(progress.lesson_id),
-        completed: Boolean(progress.completed),
-      }));
+      const progressRows: LessonProgressRecord[] =
+        (
+          progressData ?? []
+        ).map(
+          (progress) => ({
+            lesson_id: String(
+              progress.lesson_id
+            ),
+            completed: Boolean(
+              progress.completed
+            ),
+          })
+        );
 
-      const completedIds = new Set(
-        progressRows
-          .filter((progress) => progress.completed)
-          .map((progress) => progress.lesson_id)
-      );
+      const completedIds =
+        new Set(
+          progressRows
+            .filter(
+              (progress) =>
+                progress.completed
+            )
+            .map(
+              (progress) =>
+                progress.lesson_id
+            )
+        );
 
       const exactStatus: EnrollmentStatus =
-        completedIds.size >= formattedLessons.length
+        completedIds.size >=
+        formattedLessons.length
           ? "completed"
           : "active";
 
       const firstIncompleteLesson =
         formattedLessons.find(
-          (lesson) => !completedIds.has(lesson.id)
+          (lesson) =>
+            !completedIds.has(
+              lesson.id
+            )
         );
 
       const initialLesson =
         firstIncompleteLesson ||
-        formattedLessons[formattedLessons.length - 1];
+        formattedLessons[
+          formattedLessons.length -
+            1
+        ];
 
-      setEnrollmentStatus(exactStatus);
-      setCourse(formattedCourse);
-      setLessons(formattedLessons);
-      setCompletedLessonIds(Array.from(completedIds));
-      setActiveLessonId(initialLesson.id);
+      setEnrollmentStatus(
+        exactStatus
+      );
+
+      setCourse(
+        formattedCourse
+      );
+
+      setLessons(
+        formattedLessons
+      );
+
+      setCompletedLessonIds(
+        Array.from(
+          completedIds
+        )
+      );
+
+      setActiveLessonId(
+        initialLesson.id
+      );
+
       setIsLoading(false);
     };
 
@@ -455,70 +659,204 @@ export default function LearnPage() {
     return () => {
       isMounted = false;
     };
-  }, [router, slug, supabase]);
+  }, [
+    router,
+    slug,
+    supabase,
+  ]);
 
   const completedSet = useMemo(
-    () => new Set(completedLessonIds),
+    () =>
+      new Set(
+        completedLessonIds
+      ),
     [completedLessonIds]
   );
 
-  const lessonSections = useMemo<LessonSection[]>(
-    () => {
-      const sectionsMap = new Map<
-        string,
-        LessonSection
-      >();
+  const lessonSections =
+    useMemo<LessonSection[]>(
+      () => {
+        const sectionsMap =
+          new Map<
+            string,
+            LessonSection
+          >();
 
-      lessons.forEach((lesson) => {
-        const sectionKey = `${lesson.section_position}-${lesson.section_title}`;
-        const currentSection =
-          sectionsMap.get(sectionKey);
+        lessons.forEach(
+          (lesson) => {
+            const sectionKey =
+              `${lesson.section_position}-` +
+              `${lesson.section_title}`;
 
-        if (currentSection) {
-          currentSection.lessons.push(lesson);
-          return;
-        }
+            const currentSection =
+              sectionsMap.get(
+                sectionKey
+              );
 
-        sectionsMap.set(sectionKey, {
-          title: lesson.section_title,
-          position: lesson.section_position,
-          lessons: [lesson],
-        });
-      });
+            if (
+              currentSection
+            ) {
+              currentSection.lessons.push(
+                lesson
+              );
 
-      return Array.from(sectionsMap.values()).sort(
-        (firstSection, secondSection) =>
-          firstSection.position -
-          secondSection.position
-      );
-    },
-    [lessons]
-  );
+              return;
+            }
 
-  const activeLessonIndex = lessons.findIndex(
-    (lesson) => lesson.id === activeLessonId
-  );
+            sectionsMap.set(
+              sectionKey,
+              {
+                title:
+                  lesson.section_title,
+                position:
+                  lesson.section_position,
+                lessons: [lesson],
+              }
+            );
+          }
+        );
+
+        return Array.from(
+          sectionsMap.values()
+        ).sort(
+          (
+            firstSection,
+            secondSection
+          ) =>
+            firstSection.position -
+            secondSection.position
+        );
+      },
+      [lessons]
+    );
+
+  const activeLessonIndex =
+    lessons.findIndex(
+      (lesson) =>
+        lesson.id ===
+        activeLessonId
+    );
 
   const currentLesson =
     activeLessonIndex >= 0
-      ? lessons[activeLessonIndex]
+      ? lessons[
+          activeLessonIndex
+        ]
       : lessons[0];
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadLessonContent =
+      async () => {
+        if (
+          !currentLesson?.id
+        ) {
+          setLessonContent(null);
+          return;
+        }
+
+        setIsContentLoading(
+          true
+        );
+
+        setContentError("");
+        setLessonContent(null);
+
+        try {
+          const response =
+            await fetch(
+              `/api/lessons/${currentLesson.id}/content`,
+              {
+                method: "GET",
+                cache: "no-store",
+              }
+            );
+
+          const data =
+            (await response.json()) as {
+              videoUrl?: string | null;
+              summaryUrl?: string | null;
+              resourcesUrl?: string | null;
+              error?: string;
+            };
+
+          if (!isMounted) {
+            return;
+          }
+
+          if (!response.ok) {
+            throw new Error(
+              data.error ||
+                "تعذر تحميل محتوى الدرس."
+            );
+          }
+
+          setLessonContent({
+            videoUrl:
+              data.videoUrl ??
+              null,
+            summaryUrl:
+              data.summaryUrl ??
+              null,
+            resourcesUrl:
+              data.resourcesUrl ??
+              null,
+          });
+        } catch (error) {
+          if (!isMounted) {
+            return;
+          }
+
+          console.error(
+            "تعذر تحميل روابط محتوى الدرس:",
+            error
+          );
+
+          setContentError(
+            error instanceof Error
+              ? error.message
+              : "تعذر تحميل محتوى الدرس."
+          );
+        } finally {
+          if (isMounted) {
+            setIsContentLoading(
+              false
+            );
+          }
+        }
+      };
+
+    void loadLessonContent();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentLesson?.id]);
 
   const completedLessonsCount =
     completedLessonIds.length;
 
-  const progressPercentage = calculateProgress(
-    completedLessonsCount,
-    lessons.length
-  );
+  const progressPercentage =
+    calculateProgress(
+      completedLessonsCount,
+      lessons.length
+    );
 
   const isCourseCompleted =
     lessons.length > 0 &&
-    completedLessonsCount >= lessons.length &&
-    enrollmentStatus === "completed";
+    completedLessonsCount >=
+      lessons.length &&
+    enrollmentStatus ===
+      "completed";
 
-  const openLesson = (lessonId: string) => {
-    setActiveLessonId(lessonId);
+  const openLesson = (
+    lessonId: string
+  ) => {
+    setActiveLessonId(
+      lessonId
+    );
+
     setProgressError("");
 
     window.scrollTo({
@@ -527,109 +865,148 @@ export default function LearnPage() {
     });
   };
 
-  /*
-   * لا نكتب مباشرة في lesson_progress أو enrollments.
-   * قاعدة البيانات هي التي تسجل الدرس وتحسب النسبة
-   * والحالة من خلال complete_lesson.
-   */
-  const completeCurrentLesson = async () => {
-    if (!currentLesson || isSavingProgress) {
-      return false;
-    }
+  const completeCurrentLesson =
+    async () => {
+      if (
+        !currentLesson ||
+        isSavingProgress
+      ) {
+        return false;
+      }
 
-    setIsSavingProgress(true);
-    setProgressError("");
-
-    try {
-      const { data, error } = await supabase.rpc(
-        "complete_lesson",
-        {
-          p_lesson_id: currentLesson.id,
-        }
+      setIsSavingProgress(
+        true
       );
 
-      if (error) {
+      setProgressError("");
+
+      try {
+        const {
+          data,
+          error,
+        } = await supabase.rpc(
+          "complete_lesson",
+          {
+            p_lesson_id:
+              currentLesson.id,
+          }
+        );
+
+        if (error) {
+          console.error(
+            "تعذر إكمال الدرس:",
+            error
+          );
+
+          setProgressError(
+            "تعذر حفظ تقدم الدرس. حاول مرة أخرى."
+          );
+
+          return false;
+        }
+
+        const resultValue =
+          Array.isArray(data)
+            ? data[0]
+            : data;
+
+        const result =
+          resultValue as
+            | CompleteLessonResult
+            | null;
+
+        if (!result) {
+          setProgressError(
+            "لم يتم استلام نتيجة حفظ التقدم."
+          );
+
+          return false;
+        }
+
+        setCompletedLessonIds(
+          (currentIds) =>
+            currentIds.includes(
+              currentLesson.id
+            )
+              ? currentIds
+              : [
+                  ...currentIds,
+                  currentLesson.id,
+                ]
+        );
+
+        setEnrollmentStatus(
+          result.status ===
+            "completed"
+            ? "completed"
+            : "active"
+        );
+
+        router.refresh();
+        return true;
+      } catch (error) {
         console.error(
-          "تعذر إكمال الدرس:",
+          "خطأ غير متوقع أثناء حفظ الدرس:",
           error
         );
+
         setProgressError(
-          "تعذر حفظ تقدم الدرس. حاول مرة أخرى."
+          "حدث خطأ غير متوقع أثناء حفظ تقدمك."
         );
+
         return false;
+      } finally {
+        setIsSavingProgress(
+          false
+        );
+      }
+    };
+
+  const goToPreviousLesson =
+    () => {
+      if (
+        isSavingProgress ||
+        activeLessonIndex <= 0
+      ) {
+        return;
       }
 
-      const resultValue = Array.isArray(data)
-        ? data[0]
-        : data;
+      openLesson(
+        lessons[
+          activeLessonIndex - 1
+        ].id
+      );
+    };
 
-      const result =
-        resultValue as CompleteLessonResult | null;
-
-      if (!result) {
-        setProgressError(
-          "لم يتم استلام نتيجة حفظ التقدم."
-        );
-        return false;
+  const goToNextLesson =
+    async () => {
+      if (
+        !currentLesson ||
+        isSavingProgress
+      ) {
+        return;
       }
 
-      setCompletedLessonIds((currentIds) =>
-        currentIds.includes(currentLesson.id)
-          ? currentIds
-          : [...currentIds, currentLesson.id]
-      );
+      const saved =
+        await completeCurrentLesson();
 
-      setEnrollmentStatus(
-        result.status === "completed"
-          ? "completed"
-          : "active"
-      );
+      if (!saved) {
+        return;
+      }
 
-      router.refresh();
-      return true;
-    } catch (error) {
-      console.error(
-        "خطأ غير متوقع أثناء حفظ الدرس:",
-        error
-      );
-      setProgressError(
-        "حدث خطأ غير متوقع أثناء حفظ تقدمك."
-      );
-      return false;
-    } finally {
-      setIsSavingProgress(false);
-    }
-  };
+      const isLastLesson =
+        activeLessonIndex ===
+        lessons.length - 1;
 
-  const goToPreviousLesson = () => {
-    if (
-      isSavingProgress ||
-      activeLessonIndex <= 0
-    ) {
-      return;
-    }
-
-    openLesson(lessons[activeLessonIndex - 1].id);
-  };
-
-  const goToNextLesson = async () => {
-    if (!currentLesson || isSavingProgress) {
-      return;
-    }
-
-    const saved = await completeCurrentLesson();
-
-    if (!saved) {
-      return;
-    }
-
-    const isLastLesson =
-      activeLessonIndex === lessons.length - 1;
-
-    if (!isLastLesson) {
-      openLesson(lessons[activeLessonIndex + 1].id);
-    }
-  };
+      if (!isLastLesson) {
+        openLesson(
+          lessons[
+            activeLessonIndex +
+              1
+          ].id
+        );
+      }
+    };
 
   if (isLoading) {
     return (
@@ -652,7 +1029,11 @@ export default function LearnPage() {
     );
   }
 
-  if (loadError || !course || !currentLesson) {
+  if (
+    loadError ||
+    !course ||
+    !currentLesson
+  ) {
     return (
       <main className="min-h-screen bg-[#09090B] text-white">
         <Navbar />
@@ -681,7 +1062,9 @@ export default function LearnPage() {
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-3 font-bold"
               >
                 عرض الباقات
-                <ArrowRight size={18} />
+                <ArrowRight
+                  size={18}
+                />
               </Link>
 
               <Link
@@ -697,19 +1080,29 @@ export default function LearnPage() {
     );
   }
 
-  const formattedStudents = new Intl.NumberFormat(
-    "en-US"
-  ).format(course.students_count);
+  const formattedStudents =
+    new Intl.NumberFormat(
+      "en-US"
+    ).format(
+      course.students_count
+    );
 
   const isLastLesson =
-    activeLessonIndex === lessons.length - 1;
+    activeLessonIndex ===
+    lessons.length - 1;
 
   const isCurrentLessonCompleted =
-    completedSet.has(currentLesson.id);
+    completedSet.has(
+      currentLesson.id
+    );
 
   const hasLessonFiles =
-    Boolean(currentLesson.summary_file_url) ||
-    Boolean(currentLesson.resources_file_url);
+    Boolean(
+      lessonContent?.summaryUrl
+    ) ||
+    Boolean(
+      lessonContent?.resourcesUrl
+    );
 
   return (
     <main className="min-h-screen bg-[#09090B] text-white">
@@ -723,7 +1116,9 @@ export default function LearnPage() {
                 href={`/courses/${course.slug}`}
                 className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-400 transition hover:text-purple-400"
               >
-                <ArrowRight size={17} />
+                <ArrowRight
+                  size={17}
+                />
                 العودة إلى تفاصيل الكورس
               </Link>
 
@@ -739,7 +1134,10 @@ export default function LearnPage() {
                 </span>
 
                 <span className="font-bold text-purple-400">
-                  {progressPercentage}%
+                  {
+                    progressPercentage
+                  }
+                  %
                 </span>
               </div>
 
@@ -753,8 +1151,12 @@ export default function LearnPage() {
               </div>
 
               <p className="mt-2 text-xs text-zinc-500">
-                أكملت {completedLessonsCount} من{" "}
-                {lessons.length} درس
+                أكملت{" "}
+                {
+                  completedLessonsCount
+                }{" "}
+                من {lessons.length}{" "}
+                درس
               </p>
             </div>
           </div>
@@ -765,16 +1167,36 @@ export default function LearnPage() {
         <div className="mx-auto grid max-w-[1500px] gap-8 xl:grid-cols-[1fr_390px]">
           <div className="min-w-0">
             <div className="relative aspect-video overflow-hidden rounded-3xl border border-white/10 bg-black shadow-2xl shadow-purple-950/30">
-              {currentLesson.video_url ? (
+              {isContentLoading ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <LoaderCircle
+                    size={44}
+                    className="animate-spin text-purple-400"
+                  />
+
+                  <p className="mt-4 text-sm font-bold text-zinc-400">
+                    جارٍ تجهيز رابط
+                    الفيديو الآمن...
+                  </p>
+                </div>
+              ) : lessonContent?.videoUrl ? (
                 <video
-                  key={currentLesson.id}
+                  key={
+                    lessonContent.videoUrl
+                  }
                   controls
                   preload="metadata"
                   poster={course.image}
                   className="h-full w-full bg-black object-contain"
                 >
-                  <source src={currentLesson.video_url} />
-                  متصفحك لا يدعم تشغيل الفيديو.
+                  <source
+                    src={
+                      lessonContent.videoUrl
+                    }
+                  />
+
+                  متصفحك لا يدعم تشغيل
+                  الفيديو.
                 </video>
               ) : (
                 <>
@@ -782,19 +1204,27 @@ export default function LearnPage() {
 
                   <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
                     <div className="flex h-20 w-20 items-center justify-center rounded-full border border-purple-400/40 bg-purple-600 text-white shadow-2xl shadow-purple-600/30">
-                      <PlayCircle size={40} />
+                      <PlayCircle
+                        size={40}
+                      />
                     </div>
 
                     <p className="mt-6 text-sm font-semibold text-purple-300">
-                      الدرس {currentLesson.position}
+                      الدرس{" "}
+                      {
+                        currentLesson.position
+                      }
                     </p>
 
                     <h2 className="mt-3 max-w-2xl text-2xl font-black md:text-4xl">
-                      {currentLesson.title}
+                      {
+                        currentLesson.title
+                      }
                     </h2>
 
                     <p className="mt-4 text-zinc-500">
-                      لم تتم إضافة فيديو لهذا الدرس حتى الآن.
+                      {contentError ||
+                        "لم تتم إضافة فيديو لهذا الدرس حتى الآن."}
                     </p>
                   </div>
                 </>
@@ -805,14 +1235,19 @@ export default function LearnPage() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <button
                   type="button"
-                  onClick={goToPreviousLesson}
+                  onClick={
+                    goToPreviousLesson
+                  }
                   disabled={
-                    activeLessonIndex <= 0 ||
+                    activeLessonIndex <=
+                      0 ||
                     isSavingProgress
                   }
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 py-3 font-bold text-zinc-300 transition hover:border-purple-500/50 hover:bg-purple-500/10 disabled:cursor-not-allowed disabled:opacity-30"
                 >
-                  <ChevronRight size={19} />
+                  <ChevronRight
+                    size={19}
+                  />
                   الدرس السابق
                 </button>
 
@@ -822,21 +1257,26 @@ export default function LearnPage() {
                   </p>
 
                   <p className="mt-1 font-bold">
-                    {activeLessonIndex + 1} من{" "}
+                    {activeLessonIndex +
+                      1}{" "}
+                    من{" "}
                     {lessons.length}
                   </p>
                 </div>
 
                 <button
                   type="button"
-                  onClick={goToNextLesson}
+                  onClick={
+                    goToNextLesson
+                  }
                   disabled={
                     isSavingProgress ||
                     (isLastLesson &&
                       isCourseCompleted)
                   }
                   className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 font-bold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                    isLastLesson && isCourseCompleted
+                    isLastLesson &&
+                    isCourseCompleted
                       ? "bg-emerald-600"
                       : "bg-gradient-to-r from-purple-600 to-indigo-600 hover:scale-105"
                   }`}
@@ -852,20 +1292,26 @@ export default function LearnPage() {
                   ) : isLastLesson &&
                     isCourseCompleted ? (
                     <>
-                      <CheckCircle2 size={19} />
+                      <CheckCircle2
+                        size={19}
+                      />
                       تم إكمال الكورس
                     </>
                   ) : isLastLesson ? (
                     <>
                       إتمام الكورس
-                      <Trophy size={19} />
+                      <Trophy
+                        size={19}
+                      />
                     </>
                   ) : (
                     <>
                       {isCurrentLessonCompleted
                         ? "الدرس التالي"
                         : "إكمال والانتقال"}
-                      <ChevronLeft size={19} />
+                      <ChevronLeft
+                        size={19}
+                      />
                     </>
                   )}
                 </button>
@@ -888,7 +1334,9 @@ export default function LearnPage() {
               >
                 <div className="flex items-center gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400">
-                    <FileText size={21} />
+                    <FileText
+                      size={21}
+                    />
                   </div>
 
                   <h2 className="text-xl font-black">
@@ -947,7 +1395,9 @@ export default function LearnPage() {
               >
                 <div className="flex items-center gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
-                    <Download size={21} />
+                    <Download
+                      size={21}
+                    />
                   </div>
 
                   <h2 className="text-xl font-black">
@@ -955,12 +1405,19 @@ export default function LearnPage() {
                   </h2>
                 </div>
 
-                {hasLessonFiles ? (
+                {isContentLoading ? (
+                  <div className="mt-6 flex items-center justify-center rounded-xl border border-white/10 bg-black/20 p-7">
+                    <LoaderCircle
+                      size={24}
+                      className="animate-spin text-blue-400"
+                    />
+                  </div>
+                ) : hasLessonFiles ? (
                   <div className="mt-6 space-y-3">
-                    {currentLesson.summary_file_url && (
+                    {lessonContent?.summaryUrl && (
                       <a
                         href={
-                          currentLesson.summary_file_url
+                          lessonContent.summaryUrl
                         }
                         target="_blank"
                         rel="noreferrer"
@@ -970,6 +1427,7 @@ export default function LearnPage() {
                           <p className="font-bold">
                             ملخص الدرس
                           </p>
+
                           <p className="mt-1 text-xs text-zinc-500">
                             PDF
                           </p>
@@ -982,10 +1440,10 @@ export default function LearnPage() {
                       </a>
                     )}
 
-                    {currentLesson.resources_file_url && (
+                    {lessonContent?.resourcesUrl && (
                       <a
                         href={
-                          currentLesson.resources_file_url
+                          lessonContent.resourcesUrl
                         }
                         target="_blank"
                         rel="noreferrer"
@@ -995,6 +1453,7 @@ export default function LearnPage() {
                           <p className="font-bold">
                             ملفات التطبيق
                           </p>
+
                           <p className="mt-1 text-xs text-zinc-500">
                             ZIP
                           </p>
@@ -1009,7 +1468,8 @@ export default function LearnPage() {
                   </div>
                 ) : (
                   <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-5 text-center text-sm leading-7 text-zinc-500">
-                    لم تتم إضافة ملفات لهذا الدرس حتى الآن.
+                    {contentError ||
+                      "لم تتم إضافة ملفات لهذا الدرس حتى الآن."}
                   </div>
                 )}
               </GlassCard>
@@ -1035,7 +1495,9 @@ export default function LearnPage() {
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 py-3 font-bold transition hover:border-purple-500/50 hover:bg-purple-500/10"
                 >
                   لوحة التحكم
-                  <ArrowRight size={18} />
+                  <ArrowRight
+                    size={18}
+                  />
                 </Link>
               </div>
 
@@ -1045,9 +1507,11 @@ export default function LearnPage() {
                     size={20}
                     className="fill-yellow-400 text-yellow-400"
                   />
+
                   <p className="mt-3 text-2xl font-black">
                     {course.rating}
                   </p>
+
                   <p className="mt-1 text-sm text-zinc-500">
                     تقييم الكورس
                   </p>
@@ -1058,9 +1522,13 @@ export default function LearnPage() {
                     size={20}
                     className="text-purple-400"
                   />
+
                   <p className="mt-3 text-2xl font-black">
-                    {formattedStudents}
+                    {
+                      formattedStudents
+                    }
                   </p>
+
                   <p className="mt-1 text-sm text-zinc-500">
                     طالب مسجل
                   </p>
@@ -1071,9 +1539,11 @@ export default function LearnPage() {
                     size={20}
                     className="text-purple-400"
                   />
+
                   <p className="mt-3 text-2xl font-black">
                     {lessons.length}
                   </p>
+
                   <p className="mt-1 text-sm text-zinc-500">
                     درس تعليمي
                   </p>
@@ -1084,9 +1554,11 @@ export default function LearnPage() {
                     size={20}
                     className="text-purple-400"
                   />
+
                   <p className="mt-3 text-2xl font-black">
                     شهادة
                   </p>
+
                   <p className="mt-1 text-sm text-zinc-500">
                     بعد إتمام الكورس
                   </p>
@@ -1114,25 +1586,31 @@ export default function LearnPage() {
                   </div>
 
                   <span className="text-sm text-zinc-500">
-                    {lessons.length} درس
+                    {lessons.length}{" "}
+                    درس
                   </span>
                 </div>
               </div>
 
               <div className="max-h-[720px] overflow-y-auto">
                 {lessonSections.map(
-                  (section, sectionIndex) => {
+                  (
+                    section,
+                    sectionIndex
+                  ) => {
                     const containsActiveLesson =
                       section.lessons.some(
                         (lesson) =>
-                          lesson.id === activeLessonId
+                          lesson.id ===
+                          activeLessonId
                       );
 
                     return (
                       <details
                         key={`${section.position}-${section.title}`}
                         open={
-                          sectionIndex === 0 ||
+                          sectionIndex ===
+                            0 ||
                           containsActiveLesson
                         }
                         className="border-b border-white/10 last:border-0"
@@ -1140,11 +1618,18 @@ export default function LearnPage() {
                         <summary className="flex cursor-pointer list-none items-center justify-between gap-4 bg-white/[0.03] px-5 py-4 transition hover:bg-purple-500/[0.06]">
                           <div>
                             <p className="font-bold">
-                              {section.title}
+                              {
+                                section.title
+                              }
                             </p>
 
                             <p className="mt-1 text-xs text-zinc-500">
-                              {section.lessons.length} درس
+                              {
+                                section
+                                  .lessons
+                                  .length
+                              }{" "}
+                              درس
                             </p>
                           </div>
 
@@ -1168,10 +1653,14 @@ export default function LearnPage() {
 
                               return (
                                 <button
-                                  key={lesson.id}
+                                  key={
+                                    lesson.id
+                                  }
                                   type="button"
                                   onClick={() =>
-                                    openLesson(lesson.id)
+                                    openLesson(
+                                      lesson.id
+                                    )
                                   }
                                   className={`flex w-full items-start gap-3 rounded-xl px-3 py-3 text-right transition ${
                                     isActive
@@ -1190,24 +1679,39 @@ export default function LearnPage() {
                                   >
                                     {isCompleted ? (
                                       <CheckCircle2
-                                        size={15}
+                                        size={
+                                          15
+                                        }
                                       />
                                     ) : isActive ? (
-                                      <PlayCircle size={15} />
+                                      <PlayCircle
+                                        size={
+                                          15
+                                        }
+                                      />
                                     ) : (
                                       <span className="text-xs">
-                                        {lesson.position}
+                                        {
+                                          lesson.position
+                                        }
                                       </span>
                                     )}
                                   </span>
 
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-sm font-semibold">
-                                      {lesson.title}
+                                      {
+                                        lesson.title
+                                      }
                                     </span>
 
                                     <span className="mt-1 flex items-center gap-1 text-xs text-zinc-600">
-                                      <Clock3 size={13} />
+                                      <Clock3
+                                        size={
+                                          13
+                                        }
+                                      />
+
                                       {formatDuration(
                                         lesson.duration_minutes
                                       )}

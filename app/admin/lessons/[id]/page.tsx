@@ -9,12 +9,8 @@ import {
   BookOpen,
   CheckCircle2,
   Clock3,
-  Download,
   Eye,
-  FileArchive,
-  FileText,
   Layers3,
-  Link2,
   ListOrdered,
   PlayCircle,
   Save,
@@ -25,6 +21,7 @@ import {
 import Navbar from "../../../../components/layout/Navbar";
 import Footer from "../../../../components/layout/Footer";
 import GlassCard from "../../../../components/ui/GlassCard";
+import LessonContentUploader from "../../../../components/admin/LessonContentUploader";
 import { createClient } from "../../../../lib/supabase/server";
 
 type PageProps = {
@@ -79,44 +76,6 @@ function getFormValue(
   return String(
     formData.get(fieldName) ?? ""
   ).trim();
-}
-
-function getOptionalValue(
-  formData: FormData,
-  fieldName: string
-) {
-  const value = getFormValue(
-    formData,
-    fieldName
-  );
-
-  return value || null;
-}
-
-function isExternalUrl(value: string) {
-  try {
-    const url = new URL(value);
-
-    return (
-      url.protocol === "https:" ||
-      url.protocol === "http:"
-    );
-  } catch {
-    return false;
-  }
-}
-
-function isValidFileLocation(
-  value: string
-) {
-  if (!value) {
-    return true;
-  }
-
-  return (
-    value.startsWith("/") ||
-    isExternalUrl(value)
-  );
 }
 
 function redirectWithError(
@@ -220,23 +179,6 @@ async function updateLesson(
     )
   );
 
-  const videoUrl = getOptionalValue(
-    formData,
-    "video_url"
-  );
-
-  const summaryFileUrl =
-    getOptionalValue(
-      formData,
-      "summary_file_url"
-    );
-
-  const resourcesFileUrl =
-    getOptionalValue(
-      formData,
-      "resources_file_url"
-    );
-
   const isPreview =
     formData.get("is_preview") ===
     "on";
@@ -290,40 +232,6 @@ async function updateLesson(
     );
   }
 
-  if (
-    videoUrl &&
-    !isExternalUrl(videoUrl)
-  ) {
-    redirectWithError(
-      lessonId,
-      "رابط الفيديو يجب أن يبدأ بـ http أو https."
-    );
-  }
-
-  if (
-    summaryFileUrl &&
-    !isValidFileLocation(
-      summaryFileUrl
-    )
-  ) {
-    redirectWithError(
-      lessonId,
-      "رابط ملخص الدرس غير صحيح."
-    );
-  }
-
-  if (
-    resourcesFileUrl &&
-    !isValidFileLocation(
-      resourcesFileUrl
-    )
-  ) {
-    redirectWithError(
-      lessonId,
-      "رابط ملفات التطبيق غير صحيح."
-    );
-  }
-
   const {
     data: updatedLesson,
     error: updateError,
@@ -338,11 +246,6 @@ async function updateLesson(
       description,
       duration_minutes:
         durationMinutes,
-      video_url: videoUrl,
-      summary_file_url:
-        summaryFileUrl,
-      resources_file_url:
-        resourcesFileUrl,
       is_preview: isPreview,
       is_published: isPublished,
     })
@@ -650,8 +553,8 @@ export default async function EditLessonPage({
               </h1>
 
               <p className="mt-3 max-w-2xl leading-7 text-zinc-400">
-                عدّل بيانات الدرس وأضف رابط
-                الفيديو وملفات المحتوى.
+                عدّل بيانات الدرس وارفع الفيديو
+                والملفات داخل التخزين الخاص.
               </p>
             </div>
           </div>
@@ -882,113 +785,6 @@ export default async function EditLessonPage({
                 />
               </div>
 
-              <div className="border-t border-white/10 pt-8">
-                <p className="text-sm font-bold text-purple-400">
-                  الفيديو والملفات
-                </p>
-
-                <h3 className="mt-2 text-2xl font-black">
-                  محتوى الدرس
-                </h3>
-
-                <p className="mt-3 text-sm leading-7 text-zinc-500">
-                  يمكنك ترك أي رابط فارغًا
-                  وإضافته لاحقًا.
-                </p>
-
-                <div className="mt-7 space-y-6">
-                  <div>
-                    <label
-                      htmlFor="video_url"
-                      className="mb-3 block text-sm font-bold text-zinc-300"
-                    >
-                      رابط فيديو الدرس
-                    </label>
-
-                    <div
-                      dir="ltr"
-                      className="flex items-center rounded-xl border border-white/10 bg-black/20 px-4 transition focus-within:border-purple-500/60"
-                    >
-                      <PlayCircle
-                        size={19}
-                        className="shrink-0 text-purple-400"
-                      />
-
-                      <input
-                        id="video_url"
-                        name="video_url"
-                        type="url"
-                        defaultValue={
-                          lesson.video_url
-                        }
-                        placeholder="https://..."
-                        className="w-full bg-transparent px-3 py-4 text-left outline-none placeholder:text-zinc-700"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="summary_file_url"
-                      className="mb-3 block text-sm font-bold text-zinc-300"
-                    >
-                      رابط ملخص الدرس PDF
-                    </label>
-
-                    <div
-                      dir="ltr"
-                      className="flex items-center rounded-xl border border-white/10 bg-black/20 px-4 transition focus-within:border-purple-500/60"
-                    >
-                      <FileText
-                        size={19}
-                        className="shrink-0 text-blue-400"
-                      />
-
-                      <input
-                        id="summary_file_url"
-                        name="summary_file_url"
-                        type="text"
-                        defaultValue={
-                          lesson.summary_file_url
-                        }
-                        placeholder="/files/lesson-summary.pdf"
-                        className="w-full bg-transparent px-3 py-4 text-left outline-none placeholder:text-zinc-700"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="resources_file_url"
-                      className="mb-3 block text-sm font-bold text-zinc-300"
-                    >
-                      رابط ملفات التطبيق ZIP
-                    </label>
-
-                    <div
-                      dir="ltr"
-                      className="flex items-center rounded-xl border border-white/10 bg-black/20 px-4 transition focus-within:border-purple-500/60"
-                    >
-                      <FileArchive
-                        size={19}
-                        className="shrink-0 text-orange-400"
-                      />
-
-                      <input
-                        id="resources_file_url"
-                        name="resources_file_url"
-                        type="text"
-                        defaultValue={
-                          lesson.resources_file_url
-                        }
-                        placeholder="/files/lesson-resources.zip"
-                        className="w-full bg-transparent px-3 py-4 text-left outline-none placeholder:text-zinc-700"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="flex cursor-pointer items-start gap-4 rounded-2xl border border-white/10 bg-black/20 p-5 transition hover:border-blue-500/40">
                   <input
@@ -1060,6 +856,22 @@ export default async function EditLessonPage({
                 </button>
               </div>
             </form>
+
+            <LessonContentUploader
+              lessonId={lesson.id}
+              courseId={course.id}
+              initialContent={{
+                video:
+                  lesson.video_url ||
+                  null,
+                summary:
+                  lesson.summary_file_url ||
+                  null,
+                resources:
+                  lesson.resources_file_url ||
+                  null,
+              }}
+            />
           </GlassCard>
 
           <aside className="space-y-6">
@@ -1163,73 +975,24 @@ export default async function EditLessonPage({
               </div>
             </GlassCard>
 
-            {(lesson.video_url ||
-              lesson.summary_file_url ||
-              lesson.resources_file_url) && (
-              <GlassCard
-                hover={false}
-                className="p-7"
-              >
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
-                  <Link2 size={24} />
-                </div>
+            <GlassCard
+              hover={false}
+              className="border-emerald-500/20 bg-emerald-500/[0.05] p-7"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
+                <ShieldCheck size={24} />
+              </div>
 
-                <h2 className="mt-5 text-xl font-black">
-                  معاينة الروابط
-                </h2>
+              <h2 className="mt-5 text-xl font-black">
+                حماية المحتوى
+              </h2>
 
-                <div className="mt-5 space-y-3">
-                  {lesson.video_url && (
-                    <a
-                      href={lesson.video_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 p-4 text-sm font-bold transition hover:border-purple-500/40"
-                    >
-                      فتح الفيديو
-                      <PlayCircle
-                        size={18}
-                        className="text-purple-400"
-                      />
-                    </a>
-                  )}
-
-                  {lesson.summary_file_url && (
-                    <a
-                      href={
-                        lesson.summary_file_url
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 p-4 text-sm font-bold transition hover:border-blue-500/40"
-                    >
-                      فتح الملخص
-                      <Download
-                        size={18}
-                        className="text-blue-400"
-                      />
-                    </a>
-                  )}
-
-                  {lesson.resources_file_url && (
-                    <a
-                      href={
-                        lesson.resources_file_url
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 p-4 text-sm font-bold transition hover:border-orange-500/40"
-                    >
-                      فتح الملفات
-                      <Download
-                        size={18}
-                        className="text-orange-400"
-                      />
-                    </a>
-                  )}
-                </div>
-              </GlassCard>
-            )}
+              <p className="mt-3 text-sm leading-7 text-zinc-400">
+                الملفات الجديدة تُحفظ داخل
+                Bucket خاص، وتظهر للطالب من
+                خلال روابط مؤقتة فقط.
+              </p>
+            </GlassCard>
           </aside>
         </div>
       </section>
