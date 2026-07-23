@@ -494,6 +494,13 @@ export async function POST(
       .slice(0, 10)
       .toUpperCase();
 
+  const isTestMode =
+    process.env
+      .PAYMOB_IS_TEST
+      ?.trim()
+      .toLowerCase() !==
+    "false";
+
   const {
     data: paymentRecord,
     error:
@@ -528,7 +535,8 @@ export async function POST(
       customer_phone:
         normalizedPhone,
 
-      is_test: true,
+      is_test:
+        isTestMode,
 
       hmac_verified:
         false,
@@ -922,6 +930,9 @@ export async function POST(
 
           payment_methods:
             paymentMethods,
+
+          is_test:
+            isTestMode,
         },
       })
       .eq(
