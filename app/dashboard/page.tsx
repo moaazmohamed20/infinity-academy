@@ -4,11 +4,14 @@ import { redirect } from "next/navigation";
 import {
   Award,
   BookOpen,
+  CalendarDays,
   CheckCircle2,
   Clock3,
+  Crown,
   Flame,
   GraduationCap,
   PlayCircle,
+  ShieldCheck,
   Star,
   Trophy,
   UserRound,
@@ -55,12 +58,37 @@ type LessonProgressRecord = {
   lesson_id: string;
 };
 
+type PlanSubscriptionRecord = {
+  plan_key: "monthly" | "yearly";
+  status: "active";
+  starts_at: string;
+  ends_at: string;
+  auto_renew: boolean;
+};
+
 function formatDate(date: string) {
   return new Intl.DateTimeFormat("ar-EG", {
     day: "numeric",
     month: "long",
     year: "numeric",
   }).format(new Date(date));
+}
+
+function calculateDaysRemaining(endsAt: string) {
+  const endDate = new Date(endsAt);
+  const now = new Date();
+
+  if (
+    Number.isNaN(endDate.getTime()) ||
+    endDate.getTime() <= now.getTime()
+  ) {
+    return 0;
+  }
+
+  return Math.ceil(
+    (endDate.getTime() - now.getTime()) /
+      (1000 * 60 * 60 * 24)
+  );
 }
 
 function calculateProgress(
@@ -138,11 +166,17 @@ export default async function DashboardPage() {
       ? claims.email
       : "";
 
+  const nowIso = new Date().toISOString();
+
   const [
     { data: profile },
     {
       data: enrollmentData,
       error: enrollmentError,
+    },
+    {
+      data: subscriptionData,
+      error: subscriptionError,
     },
   ] = await Promise.all([
     supabase
@@ -166,7 +200,52 @@ export default async function DashboardPage() {
       .order("enrolled_at", {
         ascending: false,
       }),
+
+    supabase
+      .from("plan_subscriptions")
+      .select(
+        `
+          plan_key,
+          status,
+          starts_at,
+          ends_at,
+          auto_renew
+        `
+      )
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .lte("starts_at", nowIso)
+      .gt("ends_at", nowIso)
+      .order("ends_at", {
+        ascending: false,
+      })
+      .limit(1)
+      .maybeSingle(),
   ]);
+
+  if (subscriptionError) {
+    console.error(
+      "Subscription loading error:",
+      subscriptionError
+    );
+  }
+
+  const currentSubscription =
+    subscriptionError || !subscriptionData
+      ? null
+      : (subscriptionData as PlanSubscriptionRecord);
+
+  const subscriptionPlanName =
+    currentSubscription?.plan_key === "yearly"
+      ? "الباقة السنوية"
+      : "الباقة الشهرية";
+
+  const subscriptionDaysRemaining =
+    currentSubscription
+      ? calculateDaysRemaining(
+          currentSubscription.ends_at
+        )
+      : 0;
 
   const profileName =
     typeof profile?.full_name ===
@@ -601,6 +680,126 @@ export default async function DashboardPage() {
               </Button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="px-6 pt-10">
+        <div className="mx-auto max-w-7xl">
+          {currentSubscription ? (
+            <GlassCard
+              hover={false}
+              className="overflow-hidden border-emerald-500/20 bg-gradient-to-l from-emerald-500/[0.08] via-purple-500/[0.06] to-white/[0.03] p-0"
+            >
+              <div className="grid gap-6 p-7 md:p-8 lg:grid-cols-[1fr_auto] lg:items-center">
+                <div className="flex items-start gap-5">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-400">
+                    <ShieldCheck size={28} />
+                  </div>
+
+                  <div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <p className="text-sm font-black text-emerald-400">
+                        اشتراكك فعال
+                      </p>
+
+                      <span className="rounded-full border border-purple-500/20 bg-purple-500/10 px-3 py-1 text-xs font-bold text-purple-300">
+                        {subscriptionPlanName}
+                      </span>
+                    </div>
+
+                    <h2 className="mt-3 text-2xl font-black md:text-3xl">
+                      يمكنك الوصول إلى جميع
+                      كورسات المنصة
+                    </h2>
+
+                    <p className="mt-3 leading-7 text-zinc-400">
+                      يستمر اشتراكك حتى{" "}
+                      <span className="font-black text-white">
+                        {formatDate(
+                          currentSubscription.ends_at
+                        )}
+                      </span>
+                      .
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid min-w-[260px] gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+                    <div className="flex items-center gap-3">
+                      <CalendarDays
+                        size={21}
+                        className="text-emerald-400"
+                      />
+
+                      <div>
+                        <p className="text-xs text-zinc-500">
+                          المدة المتبقية
+                        </p>
+
+                        <p className="mt-1 text-xl font-black text-emerald-300">
+                          {subscriptionDaysRemaining}{" "}
+                          يوم
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+                    <div className="flex items-center gap-3">
+                      <Crown
+                        size={21}
+                        className="text-purple-400"
+                      />
+
+                      <div>
+                        <p className="text-xs text-zinc-500">
+                          التجديد التلقائي
+                        </p>
+
+                        <p className="mt-1 font-black">
+                          {currentSubscription.auto_renew
+                            ? "مفعّل"
+                            : "غير مفعّل"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </GlassCard>
+          ) : (
+            <GlassCard
+              hover={false}
+              className="border-yellow-500/20 bg-yellow-500/[0.05] p-7 md:p-8"
+            >
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-sm font-black text-yellow-400">
+                    لا يوجد اشتراك فعال
+                  </p>
+
+                  <h2 className="mt-3 text-2xl font-black">
+                    فعّل اشتراكك للوصول إلى جميع
+                    الكورسات
+                  </h2>
+
+                  <p className="mt-3 text-zinc-400">
+                    اختر الباقة المناسبة وابدأ
+                    التعلم داخل المنصة.
+                  </p>
+                </div>
+
+                <Button
+                  href="/pricing"
+                  className="w-fit px-8 py-4"
+                >
+                  عرض الباقات
+                  <Crown size={19} />
+                </Button>
+              </div>
+            </GlassCard>
+          )}
         </div>
       </section>
 
