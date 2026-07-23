@@ -40,10 +40,50 @@ type SubscriptionRecord = {
   ends_at: string;
 };
 
+type SearchParams = {
+  verified?: string | string[];
+  verification_error?: string | string[];
+};
+
+type PaymentResultPageProps = {
+  searchParams: Promise<SearchParams>;
+};
+
 const planNames = {
   monthly: "الباقة الاحترافية الشهرية",
   yearly: "الباقة السنوية",
 };
+
+function getSearchParam(
+  value: string | string[] | undefined
+) {
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+
+  return value ?? "";
+}
+
+function getVerificationErrorMessage(
+  errorCode: string
+) {
+  switch (errorCode) {
+    case "invalid_hmac":
+      return "تعذر التحقق من توقيع عملية الدفع. لم يتم اعتماد نتيجة الدفع من رابط التحويل.";
+
+    case "missing_hmac":
+      return "بيانات التحقق الخاصة بعملية الدفع غير مكتملة.";
+
+    case "missing_configuration":
+      return "إعدادات التحقق من الدفع غير مكتملة داخل الخادم.";
+
+    case "missing_parameters":
+      return "بيانات عملية الدفع المرسلة غير مكتملة.";
+
+    default:
+      return "تعذر التحقق من نتيجة عملية الدفع بأمان.";
+  }
+}
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -75,7 +115,30 @@ function formatAmount(
   }).format(amountCents / 100);
 }
 
-export default async function PaymentResultPage() {
+export default async function PaymentResultPage({
+  searchParams,
+}: PaymentResultPageProps) {
+  const params = await searchParams;
+
+  const verifiedParam = getSearchParam(
+    params.verified
+  );
+
+  const verificationError =
+    getSearchParam(
+      params.verification_error
+    );
+
+  /*
+   * لا نعتمد على آخر عملية مدفوعة إذا كان رابط
+   * التحويل الحالي فشل في التحقق من HMAC.
+   */
+  const verificationFailed =
+    verifiedParam === "false";
+
+  const verificationSucceeded =
+    verifiedParam === "true";
+
   const supabase = await createClient();
 
   const {
@@ -139,11 +202,34 @@ export default async function PaymentResultPage() {
   const payment =
     paymentData as PaymentRecord | null;
 
+  /*
+   * لو الرابط الحالي غير موثوق، لا نعرض اشتراكًا
+   * ناجحًا اعتمادًا على عملية قديمة.
+   */
+  const isPaid =
+    !verificationFailed &&
+    payment?.status === "paid";
+
+  const isPending =
+    !verificationFailed &&
+    payment?.status === "pending";
+
+  const isFailed =
+    verificationFailed ||
+    Boolean(
+      payment &&
+        [
+          "failed",
+          "cancelled",
+          "refunded",
+        ].includes(payment.status)
+    );
+
   let subscription:
     | SubscriptionRecord
     | null = null;
 
-  if (payment?.status === "paid") {
+  if (isPaid) {
     const {
       data: subscriptionData,
       error: subscriptionError,
@@ -175,19 +261,10 @@ export default async function PaymentResultPage() {
       subscriptionData as SubscriptionRecord | null;
   }
 
-  const isPending =
-    payment?.status === "pending";
-
-  const isPaid =
-    payment?.status === "paid";
-
-  const isFailed =
-    payment &&
-    [
-      "failed",
-      "cancelled",
-      "refunded",
-    ].includes(payment.status);
+  const verificationErrorMessage =
+    getVerificationErrorMessage(
+      verificationError
+    );
 
   return (
     <main className="min-h-screen bg-[#09090B] text-white">
@@ -222,7 +299,57 @@ export default async function PaymentResultPage() {
             </p>
           </div>
 
-          {!payment || paymentError ? (
+          {verificationFailed ? (
+            <div className="mt-12 overflow-hidden rounded-3xl border border-red-500/20 bg-white/[0.04]">
+              <div className="border-b border-red-500/20 bg-red-500/[0.07] px-7 py-8 text-center">
+                <XCircle
+                  size={64}
+                  className="mx-auto text-red-400"
+                />
+
+                <h2 className="mt-5 text-3xl font-black text-red-300">
+                  تعذر التحقق من عملية الدفع
+                </h2>
+
+                <p className="mx-auto mt-3 max-w-xl leading-8 text-red-100/60">
+                  {verificationErrorMessage}
+                </p>
+              </div>
+
+              <div className="p-7 md:p-9">
+                <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/[0.05] p-5">
+                  <p className="font-bold text-yellow-300">
+                    لم يتم عرض نجاح عملية قديمة
+                  </p>
+
+                  <p className="mt-2 leading-7 text-zinc-400">
+                    لن تعتبر هذه الصفحة عملية
+                    الدفع ناجحة إلا بعد التحقق
+                    الصحيح من رابط Paymob أو تحديث
+                    حالة العملية داخل قاعدة
+                    البيانات.
+                  </p>
+                </div>
+
+                <div className="mt-8 grid gap-3 sm:grid-cols-2">
+                  <Link
+                    href="/pricing"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 font-black transition hover:brightness-110"
+                  >
+                    إعادة محاولة الدفع
+                    <ArrowRight size={19} />
+                  </Link>
+
+                  <Link
+                    href="/dashboard"
+                    className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-4 font-bold transition hover:border-purple-500/40"
+                  >
+                    الذهاب إلى لوحة التحكم
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ) : !payment || paymentError ? (
             <div className="mt-12 rounded-3xl border border-yellow-500/20 bg-yellow-500/[0.05] p-8 text-center">
               <Clock3
                 size={58}
@@ -263,6 +390,13 @@ export default async function PaymentResultPage() {
                     يمكنك الآن الاستفادة من
                     محتوى المنصة.
                   </p>
+
+                  {verificationSucceeded && (
+                    <p className="mt-3 text-sm font-bold text-emerald-300/70">
+                      تم التحقق من رابط Paymob
+                      بنجاح.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -310,9 +444,11 @@ export default async function PaymentResultPage() {
                     </p>
 
                     <p className="mt-2 font-black">
-                      {planNames[
-                        payment.plan_key
-                      ]}
+                      {
+                        planNames[
+                          payment.plan_key
+                        ]
+                      }
                     </p>
                   </div>
 

@@ -1,15 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useParams,
-  useRouter,
-} from "next/navigation";
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Award,
@@ -47,9 +40,7 @@ type CourseRecord = {
   lessons_count: number;
 };
 
-type EnrollmentStatus =
-  | "active"
-  | "completed";
+type EnrollmentStatus = "active" | "completed";
 
 type LessonRecord = {
   id: string;
@@ -76,14 +67,19 @@ type LessonSection = {
   lessons: LessonRecord[];
 };
 
+type CompleteLessonResult = {
+  enrollment_id: string;
+  progress: number;
+  status: EnrollmentStatus;
+  completed_lessons: number;
+  total_lessons: number;
+};
+
 function calculateProgress(
   completedLessons: number,
   totalLessons: number
 ) {
-  if (
-    totalLessons <= 0 ||
-    completedLessons <= 0
-  ) {
+  if (totalLessons <= 0 || completedLessons <= 0) {
     return 0;
   }
 
@@ -93,10 +89,7 @@ function calculateProgress(
 
   return Math.max(
     1,
-    Math.round(
-      (completedLessons / totalLessons) *
-        100
-    )
+    Math.round((completedLessons / totalLessons) * 100)
   );
 }
 
@@ -109,70 +102,57 @@ function formatDuration(minutes: number) {
     return "دقيقتان";
   }
 
-  if (
-    minutes >= 3 &&
-    minutes <= 10
-  ) {
+  if (minutes >= 3 && minutes <= 10) {
     return `${minutes} دقائق`;
   }
 
   return `${minutes} دقيقة`;
 }
 
-export default function LearnPage() {
-  const params = useParams<{
-    slug: string;
-  }>();
+function getAccessErrorMessage(message?: string) {
+  if (message?.includes("اشتراك فعال")) {
+    return "يجب أن يكون لديك اشتراك فعال لفتح هذا الكورس.";
+  }
 
+  if (message?.includes("تسجيل الدخول")) {
+    return "يجب تسجيل الدخول أولًا لفتح الكورس.";
+  }
+
+  if (
+    message?.includes("غير موجود") ||
+    message?.includes("غير متاح")
+  ) {
+    return "الكورس غير موجود أو غير متاح حاليًا.";
+  }
+
+  return "تعذر التحقق من صلاحية دخولك إلى الكورس.";
+}
+
+export default function LearnPage() {
+  const params = useParams<{ slug: string }>();
   const router = useRouter();
 
-  const supabase = useMemo(
-    () => createClient(),
-    []
-  );
-
+  const supabase = useMemo(() => createClient(), []);
   const slug = params.slug;
 
-  const [course, setCourse] =
-    useState<CourseRecord | null>(null);
-
-  const [lessons, setLessons] = useState<
-    LessonRecord[]
-  >([]);
-
+  const [course, setCourse] = useState<CourseRecord | null>(
+    null
+  );
+  const [lessons, setLessons] = useState<LessonRecord[]>(
+    []
+  );
   const [
     completedLessonIds,
     setCompletedLessonIds,
   ] = useState<string[]>([]);
-
-  const [
-    activeLessonId,
-    setActiveLessonId,
-  ] = useState("");
-
-  const [userId, setUserId] =
+  const [activeLessonId, setActiveLessonId] =
     useState("");
-
-  const [enrollmentId, setEnrollmentId] =
-    useState("");
-
-  const [
-    enrollmentStatus,
-    setEnrollmentStatus,
-  ] =
+  const [enrollmentStatus, setEnrollmentStatus] =
     useState<EnrollmentStatus>("active");
-
-  const [isLoading, setIsLoading] =
-    useState(true);
-
-  const [
-    isSavingProgress,
-    setIsSavingProgress,
-  ] = useState(false);
-
-  const [loadError, setLoadError] =
-    useState("");
-
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSavingProgress, setIsSavingProgress] =
+    useState(false);
+  const [loadError, setLoadError] = useState("");
   const [progressError, setProgressError] =
     useState("");
 
@@ -182,6 +162,7 @@ export default function LearnPage() {
     const loadCourse = async () => {
       setIsLoading(true);
       setLoadError("");
+      setProgressError("");
 
       const {
         data: { user },
@@ -198,28 +179,26 @@ export default function LearnPage() {
         return;
       }
 
-      const {
-        data: courseData,
-        error: courseError,
-      } = await supabase
-        .from("courses")
-        .select(
-          `
-            id,
-            slug,
-            title,
-            instructor,
-            category,
-            description,
-            image,
-            rating,
-            students_count,
-            duration,
-            lessons_count
-          `
-        )
-        .eq("slug", slug)
-        .maybeSingle();
+      const { data: courseData, error: courseError } =
+        await supabase
+          .from("courses")
+          .select(
+            `
+              id,
+              slug,
+              title,
+              instructor,
+              category,
+              description,
+              image,
+              rating,
+              students_count,
+              duration,
+              lessons_count
+            `
+          )
+          .eq("slug", slug)
+          .maybeSingle();
 
       if (!isMounted) {
         return;
@@ -230,11 +209,9 @@ export default function LearnPage() {
           "تعذر تحميل الكورس:",
           courseError
         );
-
         setLoadError(
           "لم نتمكن من العثور على هذا الكورس."
         );
-
         setIsLoading(false);
         return;
       }
@@ -243,37 +220,52 @@ export default function LearnPage() {
         id: String(courseData.id),
         slug: String(courseData.slug),
         title: String(courseData.title),
-
-        instructor: String(
-          courseData.instructor
-        ),
-
-        category: String(
-          courseData.category
-        ),
-
+        instructor: String(courseData.instructor),
+        category: String(courseData.category),
         description:
           courseData.description === null
             ? null
-            : String(
-                courseData.description
-              ),
-
+            : String(courseData.description),
         image: String(courseData.image),
         rating: Number(courseData.rating),
-
         students_count: Number(
           courseData.students_count
         ),
-
-        duration: String(
-          courseData.duration
-        ),
-
-        lessons_count: Number(
-          courseData.lessons_count
-        ),
+        duration: String(courseData.duration),
+        lessons_count: Number(courseData.lessons_count),
       };
+
+      /*
+       * الدالة الآمنة تتحقق من وجود اشتراك فعال،
+       * أو وصول يدوي من الإدارة، ثم تنشئ/تحدّث
+       * تسجيل الكورس من داخل قاعدة البيانات.
+       */
+      const { error: ensureEnrollmentError } =
+        await supabase.rpc(
+          "ensure_course_enrollment",
+          {
+            p_course_id: formattedCourse.id,
+          }
+        );
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (ensureEnrollmentError) {
+        console.error(
+          "تعذر التحقق من صلاحية دخول الكورس:",
+          ensureEnrollmentError
+        );
+        setCourse(formattedCourse);
+        setLoadError(
+          getAccessErrorMessage(
+            ensureEnrollmentError.message
+          )
+        );
+        setIsLoading(false);
+        return;
+      }
 
       const {
         data: enrollmentData,
@@ -289,59 +281,52 @@ export default function LearnPage() {
           `
         )
         .eq("user_id", user.id)
-        .eq(
-          "course_id",
-          formattedCourse.id
-        )
+        .eq("course_id", formattedCourse.id)
         .maybeSingle();
 
       if (!isMounted) {
         return;
       }
 
-      if (
-        enrollmentError ||
-        !enrollmentData
-      ) {
-        router.replace(
-          `/courses/${formattedCourse.slug}`
+      if (enrollmentError || !enrollmentData) {
+        console.error(
+          "تعذر تحميل تسجيل الكورس:",
+          enrollmentError
         );
-
-        router.refresh();
+        setCourse(formattedCourse);
+        setLoadError(
+          "تعذر تحميل تسجيلك داخل هذا الكورس."
+        );
+        setIsLoading(false);
         return;
       }
 
-      const {
-        data: lessonsData,
-        error: lessonsError,
-      } = await supabase
-        .from("lessons")
-        .select(
-          `
-            id,
-            course_id,
-            position,
-            section_title,
-            section_position,
-            title,
-            description,
-            duration_minutes,
-            video_url,
-            summary_file_url,
-            resources_file_url
-          `
-        )
-        .eq(
-          "course_id",
-          formattedCourse.id
-        )
-        .eq("is_published", true)
-        .order("section_position", {
-          ascending: true,
-        })
-        .order("position", {
-          ascending: true,
-        });
+      const { data: lessonsData, error: lessonsError } =
+        await supabase
+          .from("lessons")
+          .select(
+            `
+              id,
+              course_id,
+              position,
+              section_title,
+              section_position,
+              title,
+              description,
+              duration_minutes,
+              video_url,
+              summary_file_url,
+              resources_file_url
+            `
+          )
+          .eq("course_id", formattedCourse.id)
+          .eq("is_published", true)
+          .order("section_position", {
+            ascending: true,
+          })
+          .order("position", {
+            ascending: true,
+          });
 
       if (!isMounted) {
         return;
@@ -356,11 +341,10 @@ export default function LearnPage() {
           "تعذر تحميل دروس الكورس:",
           lessonsError
         );
-
+        setCourse(formattedCourse);
         setLoadError(
           "لم تتم إضافة دروس منشورة لهذا الكورس حتى الآن."
         );
-
         setIsLoading(false);
         return;
       }
@@ -368,64 +352,37 @@ export default function LearnPage() {
       const formattedLessons: LessonRecord[] =
         lessonsData.map((lesson) => ({
           id: String(lesson.id),
-
-          course_id: String(
-            lesson.course_id
-          ),
-
-          position: Number(
-            lesson.position
-          ),
-
-          section_title: String(
-            lesson.section_title
-          ),
-
+          course_id: String(lesson.course_id),
+          position: Number(lesson.position),
+          section_title: String(lesson.section_title),
           section_position: Number(
             lesson.section_position
           ),
-
           title: String(lesson.title),
-
           description:
             lesson.description === null
               ? null
-              : String(
-                  lesson.description
-                ),
-
+              : String(lesson.description),
           duration_minutes: Number(
             lesson.duration_minutes
           ),
-
           video_url:
             lesson.video_url === null
               ? null
-              : String(
-                  lesson.video_url
-                ),
-
+              : String(lesson.video_url),
           summary_file_url:
-            lesson.summary_file_url ===
-            null
+            lesson.summary_file_url === null
               ? null
-              : String(
-                  lesson.summary_file_url
-                ),
-
+              : String(lesson.summary_file_url),
           resources_file_url:
-            lesson.resources_file_url ===
-            null
+            lesson.resources_file_url === null
               ? null
-              : String(
-                  lesson.resources_file_url
-                ),
+              : String(lesson.resources_file_url),
         }));
 
-      const lessonIds =
-        formattedLessons.map(
-          (lesson) => lesson.id
-        );
+      const lessonIds = formattedLessons.map(
+        (lesson) => lesson.id
+      );
 
       const {
         data: progressData,
@@ -450,236 +407,46 @@ export default function LearnPage() {
           "تعذر تحميل تقدم الدروس:",
           progressLoadError
         );
-
+        setCourse(formattedCourse);
         setLoadError(
           "تعذر تحميل تقدمك داخل الكورس."
         );
-
         setIsLoading(false);
         return;
       }
 
-      const progressRows: LessonProgressRecord[] =
-        (progressData ?? []).map(
-          (progress) => ({
-            lesson_id: String(
-              progress.lesson_id
-            ),
+      const progressRows: LessonProgressRecord[] = (
+        progressData ?? []
+      ).map((progress) => ({
+        lesson_id: String(progress.lesson_id),
+        completed: Boolean(progress.completed),
+      }));
 
-            completed: Boolean(
-              progress.completed
-            ),
-          })
-        );
-
-      const existingProgressIds =
-        new Set(
-          progressRows.map(
-            (progress) =>
-              progress.lesson_id
-          )
-        );
-
-      let completedIds = new Set(
+      const completedIds = new Set(
         progressRows
-          .filter(
-            (progress) =>
-              progress.completed
-          )
-          .map(
-            (progress) =>
-              progress.lesson_id
-          )
+          .filter((progress) => progress.completed)
+          .map((progress) => progress.lesson_id)
       );
-
-      const oldProgress = Number(
-        enrollmentData.progress
-      );
-
-      if (
-        completedIds.size === 0 &&
-        oldProgress > 0
-      ) {
-        const oldCompletedCount =
-          oldProgress >= 100
-            ? formattedLessons.length
-            : Math.max(
-                1,
-                Math.floor(
-                  (oldProgress / 100) *
-                    formattedLessons.length
-                )
-              );
-
-        const oldCompletedLessons =
-          formattedLessons.slice(
-            0,
-            oldCompletedCount
-          );
-
-        const oldCompletedIds =
-          oldCompletedLessons.map(
-            (lesson) => lesson.id
-          );
-
-        const missingProgressRows =
-          oldCompletedLessons
-            .filter(
-              (lesson) =>
-                !existingProgressIds.has(
-                  lesson.id
-                )
-            )
-            .map((lesson) => ({
-              user_id: user.id,
-              lesson_id: lesson.id,
-              completed: true,
-              completed_at:
-                new Date().toISOString(),
-              last_watched_seconds: 0,
-            }));
-
-        if (
-          missingProgressRows.length > 0
-        ) {
-          const {
-            error:
-              migrationInsertError,
-          } = await supabase
-            .from("lesson_progress")
-            .insert(
-              missingProgressRows
-            );
-
-          if (migrationInsertError) {
-            console.error(
-              "تعذر نقل التقدم القديم:",
-              migrationInsertError
-            );
-          }
-        }
-
-        const existingOldLessonIds =
-          oldCompletedIds.filter(
-            (lessonId) =>
-              existingProgressIds.has(
-                lessonId
-              )
-          );
-
-        if (
-          existingOldLessonIds.length > 0
-        ) {
-          const {
-            error:
-              migrationUpdateError,
-          } = await supabase
-            .from("lesson_progress")
-            .update({
-              completed: true,
-              completed_at:
-                new Date().toISOString(),
-            })
-            .eq("user_id", user.id)
-            .in(
-              "lesson_id",
-              existingOldLessonIds
-            );
-
-          if (migrationUpdateError) {
-            console.error(
-              "تعذر تحديث التقدم القديم:",
-              migrationUpdateError
-            );
-          }
-        }
-
-        completedIds = new Set(
-          oldCompletedIds
-        );
-      }
-
-      const exactProgress =
-        calculateProgress(
-          completedIds.size,
-          formattedLessons.length
-        );
 
       const exactStatus: EnrollmentStatus =
-        completedIds.size >=
-        formattedLessons.length
+        completedIds.size >= formattedLessons.length
           ? "completed"
           : "active";
-
-      const currentStatus =
-        enrollmentData.status ===
-        "completed"
-          ? "completed"
-          : "active";
-
-      if (
-        exactProgress !== oldProgress ||
-        exactStatus !== currentStatus
-      ) {
-        const { error: syncError } =
-          await supabase
-            .from("enrollments")
-            .update({
-              progress: exactProgress,
-              status: exactStatus,
-
-              completed_at:
-                exactStatus ===
-                "completed"
-                  ? enrollmentData.completed_at ||
-                    new Date().toISOString()
-                  : null,
-            })
-            .eq(
-              "id",
-              String(enrollmentData.id)
-            )
-            .eq("user_id", user.id);
-
-        if (syncError) {
-          console.error(
-            "تعذر مزامنة نسبة التقدم:",
-            syncError
-          );
-        }
-      }
 
       const firstIncompleteLesson =
         formattedLessons.find(
-          (lesson) =>
-            !completedIds.has(lesson.id)
+          (lesson) => !completedIds.has(lesson.id)
         );
 
       const initialLesson =
         firstIncompleteLesson ||
-        formattedLessons[
-          formattedLessons.length - 1
-        ];
-
-      setUserId(user.id);
-
-      setEnrollmentId(
-        String(enrollmentData.id)
-      );
+        formattedLessons[formattedLessons.length - 1];
 
       setEnrollmentStatus(exactStatus);
-
       setCourse(formattedCourse);
       setLessons(formattedLessons);
-
-      setCompletedLessonIds(
-        Array.from(completedIds)
-      );
-
-      setActiveLessonId(
-        initialLesson.id
-      );
-
+      setCompletedLessonIds(Array.from(completedIds));
+      setActiveLessonId(initialLesson.id);
       setIsLoading(false);
     };
 
@@ -695,8 +462,8 @@ export default function LearnPage() {
     [completedLessonIds]
   );
 
-  const lessonSections =
-    useMemo<LessonSection[]>(() => {
+  const lessonSections = useMemo<LessonSection[]>(
+    () => {
       const sectionsMap = new Map<
         string,
         LessonSection
@@ -704,43 +471,33 @@ export default function LearnPage() {
 
       lessons.forEach((lesson) => {
         const sectionKey = `${lesson.section_position}-${lesson.section_title}`;
-
         const currentSection =
           sectionsMap.get(sectionKey);
 
         if (currentSection) {
-          currentSection.lessons.push(
-            lesson
-          );
-
+          currentSection.lessons.push(lesson);
           return;
         }
 
         sectionsMap.set(sectionKey, {
-          title:
-            lesson.section_title,
-
-          position:
-            lesson.section_position,
-
+          title: lesson.section_title,
+          position: lesson.section_position,
           lessons: [lesson],
         });
       });
 
-      return Array.from(
-        sectionsMap.values()
-      ).sort(
+      return Array.from(sectionsMap.values()).sort(
         (firstSection, secondSection) =>
           firstSection.position -
           secondSection.position
       );
-    }, [lessons]);
+    },
+    [lessons]
+  );
 
-  const activeLessonIndex =
-    lessons.findIndex(
-      (lesson) =>
-        lesson.id === activeLessonId
-    );
+  const activeLessonIndex = lessons.findIndex(
+    (lesson) => lesson.id === activeLessonId
+  );
 
   const currentLesson =
     activeLessonIndex >= 0
@@ -750,21 +507,17 @@ export default function LearnPage() {
   const completedLessonsCount =
     completedLessonIds.length;
 
-  const progressPercentage =
-    calculateProgress(
-      completedLessonsCount,
-      lessons.length
-    );
+  const progressPercentage = calculateProgress(
+    completedLessonsCount,
+    lessons.length
+  );
 
   const isCourseCompleted =
     lessons.length > 0 &&
-    completedLessonsCount >=
-      lessons.length &&
+    completedLessonsCount >= lessons.length &&
     enrollmentStatus === "completed";
 
-  const openLesson = (
-    lessonId: string
-  ) => {
+  const openLesson = (lessonId: string) => {
     setActiveLessonId(lessonId);
     setProgressError("");
 
@@ -774,168 +527,79 @@ export default function LearnPage() {
     });
   };
 
-  const saveEnrollmentProgress = async (
-    completedCount: number
-  ) => {
-    if (
-      !userId ||
-      !enrollmentId ||
-      lessons.length === 0
-    ) {
+  /*
+   * لا نكتب مباشرة في lesson_progress أو enrollments.
+   * قاعدة البيانات هي التي تسجل الدرس وتحسب النسبة
+   * والحالة من خلال complete_lesson.
+   */
+  const completeCurrentLesson = async () => {
+    if (!currentLesson || isSavingProgress) {
       return false;
     }
 
-    const nextProgress =
-      calculateProgress(
-        completedCount,
-        lessons.length
-      );
+    setIsSavingProgress(true);
+    setProgressError("");
 
-    const nextStatus: EnrollmentStatus =
-      completedCount >= lessons.length
-        ? "completed"
-        : "active";
-
-    const { error } = await supabase
-      .from("enrollments")
-      .update({
-        progress: nextProgress,
-        status: nextStatus,
-
-        completed_at:
-          nextStatus === "completed"
-            ? new Date().toISOString()
-            : null,
-      })
-      .eq("id", enrollmentId)
-      .eq("user_id", userId);
-
-    if (error) {
-      console.error(
-        "تعذر تحديث نسبة الكورس:",
-        error
-      );
-
-      setProgressError(
-        "تم حفظ الدرس، لكن تعذر تحديث نسبة الكورس. اضغط مرة أخرى."
-      );
-
-      return false;
-    }
-
-    setEnrollmentStatus(nextStatus);
-
-    return true;
-  };
-
-  const completeCurrentLesson =
-    async () => {
-      if (
-        !currentLesson ||
-        !userId ||
-        isSavingProgress
-      ) {
-        return false;
-      }
-
-      setIsSavingProgress(true);
-      setProgressError("");
-
-      let nextCompletedIds =
-        completedLessonIds;
-
-      if (
-        !completedSet.has(
-          currentLesson.id
-        )
-      ) {
-        const completedAt =
-          new Date().toISOString();
-
-        const { error: insertError } =
-          await supabase
-            .from("lesson_progress")
-            .insert({
-              user_id: userId,
-
-              lesson_id:
-                currentLesson.id,
-
-              completed: true,
-              completed_at: completedAt,
-              last_watched_seconds: 0,
-            });
-
-        if (
-          insertError &&
-          insertError.code === "23505"
-        ) {
-          const { error: updateError } =
-            await supabase
-              .from("lesson_progress")
-              .update({
-                completed: true,
-                completed_at:
-                  completedAt,
-              })
-              .eq("user_id", userId)
-              .eq(
-                "lesson_id",
-                currentLesson.id
-              );
-
-          if (updateError) {
-            console.error(
-              "تعذر تحديث تقدم الدرس:",
-              updateError
-            );
-
-            setProgressError(
-              "تعذر حفظ تقدم الدرس. حاول مرة أخرى."
-            );
-
-            setIsSavingProgress(false);
-            return false;
-          }
-        } else if (insertError) {
-          console.error(
-            "تعذر حفظ تقدم الدرس:",
-            insertError
-          );
-
-          setProgressError(
-            "تعذر حفظ تقدم الدرس. حاول مرة أخرى."
-          );
-
-          setIsSavingProgress(false);
-          return false;
+    try {
+      const { data, error } = await supabase.rpc(
+        "complete_lesson",
+        {
+          p_lesson_id: currentLesson.id,
         }
+      );
 
-        nextCompletedIds = [
-          ...completedLessonIds,
-          currentLesson.id,
-        ];
-
-        setCompletedLessonIds(
-          nextCompletedIds
+      if (error) {
+        console.error(
+          "تعذر إكمال الدرس:",
+          error
         );
-      }
-
-      const enrollmentSaved =
-        await saveEnrollmentProgress(
-          nextCompletedIds.length
+        setProgressError(
+          "تعذر حفظ تقدم الدرس. حاول مرة أخرى."
         );
-
-      setIsSavingProgress(false);
-
-      if (!enrollmentSaved) {
         return false;
       }
+
+      const resultValue = Array.isArray(data)
+        ? data[0]
+        : data;
+
+      const result =
+        resultValue as CompleteLessonResult | null;
+
+      if (!result) {
+        setProgressError(
+          "لم يتم استلام نتيجة حفظ التقدم."
+        );
+        return false;
+      }
+
+      setCompletedLessonIds((currentIds) =>
+        currentIds.includes(currentLesson.id)
+          ? currentIds
+          : [...currentIds, currentLesson.id]
+      );
+
+      setEnrollmentStatus(
+        result.status === "completed"
+          ? "completed"
+          : "active"
+      );
 
       router.refresh();
-
       return true;
-    };
+    } catch (error) {
+      console.error(
+        "خطأ غير متوقع أثناء حفظ الدرس:",
+        error
+      );
+      setProgressError(
+        "حدث خطأ غير متوقع أثناء حفظ تقدمك."
+      );
+      return false;
+    } finally {
+      setIsSavingProgress(false);
+    }
+  };
 
   const goToPreviousLesson = () => {
     if (
@@ -945,38 +609,25 @@ export default function LearnPage() {
       return;
     }
 
-    openLesson(
-      lessons[
-        activeLessonIndex - 1
-      ].id
-    );
+    openLesson(lessons[activeLessonIndex - 1].id);
   };
 
   const goToNextLesson = async () => {
-    if (
-      !currentLesson ||
-      isSavingProgress
-    ) {
+    if (!currentLesson || isSavingProgress) {
       return;
     }
 
-    const saved =
-      await completeCurrentLesson();
+    const saved = await completeCurrentLesson();
 
     if (!saved) {
       return;
     }
 
     const isLastLesson =
-      activeLessonIndex ===
-      lessons.length - 1;
+      activeLessonIndex === lessons.length - 1;
 
     if (!isLastLesson) {
-      openLesson(
-        lessons[
-          activeLessonIndex + 1
-        ].id
-      );
+      openLesson(lessons[activeLessonIndex + 1].id);
     }
   };
 
@@ -1001,11 +652,7 @@ export default function LearnPage() {
     );
   }
 
-  if (
-    loadError ||
-    !course ||
-    !currentLesson
-  ) {
+  if (loadError || !course || !currentLesson) {
     return (
       <main className="min-h-screen bg-[#09090B] text-white">
         <Navbar />
@@ -1028,38 +675,41 @@ export default function LearnPage() {
               {loadError}
             </p>
 
-            <Link
-              href="/courses"
-              className="mt-7 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-3 font-bold"
-            >
-              <ArrowRight size={18} />
-              العودة إلى الكورسات
-            </Link>
+            <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
+              <Link
+                href="/pricing"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-3 font-bold"
+              >
+                عرض الباقات
+                <ArrowRight size={18} />
+              </Link>
+
+              <Link
+                href="/courses"
+                className="inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 px-6 py-3 font-bold"
+              >
+                العودة إلى الكورسات
+              </Link>
+            </div>
           </GlassCard>
         </section>
       </main>
     );
   }
 
-  const formattedStudents =
-    new Intl.NumberFormat(
-      "en-US"
-    ).format(course.students_count);
+  const formattedStudents = new Intl.NumberFormat(
+    "en-US"
+  ).format(course.students_count);
 
   const isLastLesson =
-    activeLessonIndex ===
-    lessons.length - 1;
+    activeLessonIndex === lessons.length - 1;
 
   const isCurrentLessonCompleted =
     completedSet.has(currentLesson.id);
 
   const hasLessonFiles =
-    Boolean(
-      currentLesson.summary_file_url
-    ) ||
-    Boolean(
-      currentLesson.resources_file_url
-    );
+    Boolean(currentLesson.summary_file_url) ||
+    Boolean(currentLesson.resources_file_url);
 
   return (
     <main className="min-h-screen bg-[#09090B] text-white">
@@ -1103,8 +753,7 @@ export default function LearnPage() {
               </div>
 
               <p className="mt-2 text-xs text-zinc-500">
-                أكملت{" "}
-                {completedLessonsCount} من{" "}
+                أكملت {completedLessonsCount} من{" "}
                 {lessons.length} درس
               </p>
             </div>
@@ -1124,14 +773,8 @@ export default function LearnPage() {
                   poster={course.image}
                   className="h-full w-full bg-black object-contain"
                 >
-                  <source
-                    src={
-                      currentLesson.video_url
-                    }
-                  />
-
-                  متصفحك لا يدعم تشغيل
-                  الفيديو.
+                  <source src={currentLesson.video_url} />
+                  متصفحك لا يدعم تشغيل الفيديو.
                 </video>
               ) : (
                 <>
@@ -1143,8 +786,7 @@ export default function LearnPage() {
                     </div>
 
                     <p className="mt-6 text-sm font-semibold text-purple-300">
-                      الدرس{" "}
-                      {currentLesson.position}
+                      الدرس {currentLesson.position}
                     </p>
 
                     <h2 className="mt-3 max-w-2xl text-2xl font-black md:text-4xl">
@@ -1152,8 +794,7 @@ export default function LearnPage() {
                     </h2>
 
                     <p className="mt-4 text-zinc-500">
-                      لم تتم إضافة فيديو لهذا
-                      الدرس حتى الآن.
+                      لم تتم إضافة فيديو لهذا الدرس حتى الآن.
                     </p>
                   </div>
                 </>
@@ -1164,9 +805,7 @@ export default function LearnPage() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <button
                   type="button"
-                  onClick={
-                    goToPreviousLesson
-                  }
+                  onClick={goToPreviousLesson}
                   disabled={
                     activeLessonIndex <= 0 ||
                     isSavingProgress
@@ -1197,8 +836,7 @@ export default function LearnPage() {
                       isCourseCompleted)
                   }
                   className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 font-bold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                    isLastLesson &&
-                    isCourseCompleted
+                    isLastLesson && isCourseCompleted
                       ? "bg-emerald-600"
                       : "bg-gradient-to-r from-purple-600 to-indigo-600 hover:scale-105"
                   }`}
@@ -1209,7 +847,6 @@ export default function LearnPage() {
                         size={19}
                         className="animate-spin"
                       />
-
                       جارٍ حفظ التقدم...
                     </>
                   ) : isLastLesson &&
@@ -1228,7 +865,6 @@ export default function LearnPage() {
                       {isCurrentLessonCompleted
                         ? "الدرس التالي"
                         : "إكمال والانتقال"}
-
                       <ChevronLeft size={19} />
                     </>
                   )}
@@ -1334,7 +970,6 @@ export default function LearnPage() {
                           <p className="font-bold">
                             ملخص الدرس
                           </p>
-
                           <p className="mt-1 text-xs text-zinc-500">
                             PDF
                           </p>
@@ -1360,7 +995,6 @@ export default function LearnPage() {
                           <p className="font-bold">
                             ملفات التطبيق
                           </p>
-
                           <p className="mt-1 text-xs text-zinc-500">
                             ZIP
                           </p>
@@ -1375,8 +1009,7 @@ export default function LearnPage() {
                   </div>
                 ) : (
                   <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-5 text-center text-sm leading-7 text-zinc-500">
-                    لم تتم إضافة ملفات لهذا
-                    الدرس حتى الآن.
+                    لم تتم إضافة ملفات لهذا الدرس حتى الآن.
                   </div>
                 )}
               </GlassCard>
@@ -1412,11 +1045,9 @@ export default function LearnPage() {
                     size={20}
                     className="fill-yellow-400 text-yellow-400"
                   />
-
                   <p className="mt-3 text-2xl font-black">
                     {course.rating}
                   </p>
-
                   <p className="mt-1 text-sm text-zinc-500">
                     تقييم الكورس
                   </p>
@@ -1427,11 +1058,9 @@ export default function LearnPage() {
                     size={20}
                     className="text-purple-400"
                   />
-
                   <p className="mt-3 text-2xl font-black">
                     {formattedStudents}
                   </p>
-
                   <p className="mt-1 text-sm text-zinc-500">
                     طالب مسجل
                   </p>
@@ -1442,11 +1071,9 @@ export default function LearnPage() {
                     size={20}
                     className="text-purple-400"
                   />
-
                   <p className="mt-3 text-2xl font-black">
                     {lessons.length}
                   </p>
-
                   <p className="mt-1 text-sm text-zinc-500">
                     درس تعليمي
                   </p>
@@ -1457,11 +1084,9 @@ export default function LearnPage() {
                     size={20}
                     className="text-purple-400"
                   />
-
                   <p className="mt-3 text-2xl font-black">
                     شهادة
                   </p>
-
                   <p className="mt-1 text-sm text-zinc-500">
                     بعد إتمام الكورس
                   </p>
@@ -1496,23 +1121,18 @@ export default function LearnPage() {
 
               <div className="max-h-[720px] overflow-y-auto">
                 {lessonSections.map(
-                  (
-                    section,
-                    sectionIndex
-                  ) => {
+                  (section, sectionIndex) => {
                     const containsActiveLesson =
                       section.lessons.some(
                         (lesson) =>
-                          lesson.id ===
-                          activeLessonId
+                          lesson.id === activeLessonId
                       );
 
                     return (
                       <details
                         key={`${section.position}-${section.title}`}
                         open={
-                          sectionIndex ===
-                            0 ||
+                          sectionIndex === 0 ||
                           containsActiveLesson
                         }
                         className="border-b border-white/10 last:border-0"
@@ -1524,12 +1144,7 @@ export default function LearnPage() {
                             </p>
 
                             <p className="mt-1 text-xs text-zinc-500">
-                              {
-                                section
-                                  .lessons
-                                  .length
-                              }{" "}
-                              درس
+                              {section.lessons.length} درس
                             </p>
                           </div>
 
@@ -1553,14 +1168,10 @@ export default function LearnPage() {
 
                               return (
                                 <button
-                                  key={
-                                    lesson.id
-                                  }
+                                  key={lesson.id}
                                   type="button"
                                   onClick={() =>
-                                    openLesson(
-                                      lesson.id
-                                    )
+                                    openLesson(lesson.id)
                                   }
                                   className={`flex w-full items-start gap-3 rounded-xl px-3 py-3 text-right transition ${
                                     isActive
@@ -1579,39 +1190,24 @@ export default function LearnPage() {
                                   >
                                     {isCompleted ? (
                                       <CheckCircle2
-                                        size={
-                                          15
-                                        }
+                                        size={15}
                                       />
                                     ) : isActive ? (
-                                      <PlayCircle
-                                        size={
-                                          15
-                                        }
-                                      />
+                                      <PlayCircle size={15} />
                                     ) : (
                                       <span className="text-xs">
-                                        {
-                                          lesson.position
-                                        }
+                                        {lesson.position}
                                       </span>
                                     )}
                                   </span>
 
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-sm font-semibold">
-                                      {
-                                        lesson.title
-                                      }
+                                      {lesson.title}
                                     </span>
 
                                     <span className="mt-1 flex items-center gap-1 text-xs text-zinc-600">
-                                      <Clock3
-                                        size={
-                                          13
-                                        }
-                                      />
-
+                                      <Clock3 size={13} />
                                       {formatDuration(
                                         lesson.duration_minutes
                                       )}

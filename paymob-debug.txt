@@ -1,0 +1,3403 @@
+﻿===== app\api\paymob\webhook\route.ts =====
+import {
+  createHmac,
+  timingSafeEqual,
+} from "node:crypto";
+
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server";
+
+import { createAdminClient } from "../../../../lib/supabase/admin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type JsonRecord = Record<
+  string,
+  unknown
+>;
+
+type PaymentRecord = {
+  id: string;
+  amount_cents: number;
+  currency: string;
+  special_reference: string;
+  is_test: boolean;
+};
+
+function asRecord(
+  value: unknown
+): JsonRecord | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return null;
+  }
+
+  return value as JsonRecord;
+}
+
+function getTextValue(
+  ...values: unknown[]
+): string {
+  for (const value of values) {
+    if (
+      typeof value === "string" &&
+      value.trim()
+    ) {
+      return value.trim();
+    }
+
+    if (
+      typeof value === "number" &&
+      Number.isFinite(value)
+    ) {
+      return String(value);
+    }
+  }
+
+  return "";
+}
+
+function toBoolean(
+  value: unknown
+): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value === 1;
+  }
+
+  if (typeof value === "string") {
+    return (
+      value
+        .trim()
+        .toLowerCase() === "true"
+    );
+  }
+
+  return false;
+}
+
+function toHmacValue(
+  value: unknown
+): string {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return "";
+  }
+
+  if (typeof value === "boolean") {
+    return value
+      ? "true"
+      : "false";
+  }
+
+  if (typeof value === "object") {
+    const record =
+      asRecord(value);
+
+    if (
+      record?.id !== undefined &&
+      record.id !== null
+    ) {
+      return String(record.id);
+    }
+
+    return "";
+  }
+
+  return String(value);
+}
+
+function uniqueHmacValues(
+  ...values: unknown[]
+): string[] {
+  return [
+    ...new Set(
+      values.map(toHmacValue)
+    ),
+  ];
+}
+
+function createCallbackHmacCandidates(
+  transaction: JsonRecord
+): string[] {
+  const order =
+    asRecord(
+      transaction.order
+    );
+
+  const integration =
+    asRecord(
+      transaction.integration
+    );
+
+  const sourceData =
+    asRecord(
+      transaction.source_data
+    );
+
+  const amountValues =
+    uniqueHmacValues(
+      transaction.amount_cents,
+      transaction.amount
+    );
+
+  const integrationValues =
+    uniqueHmacValues(
+      transaction.integration,
+      transaction.integration_id,
+      integration?.id
+    );
+
+  const orderValues =
+    uniqueHmacValues(
+      order?.id,
+      transaction.order
+    );
+
+  const panValues =
+    uniqueHmacValues(
+      sourceData?.pan,
+      transaction.source_data_pan
+    );
+
+  const subTypeValues =
+    uniqueHmacValues(
+      sourceData?.sub_type,
+      transaction.source_data_sub_type
+    );
+
+  const sourceTypeValues =
+    uniqueHmacValues(
+      sourceData?.type,
+      transaction.source_data_type
+    );
+
+  const candidates =
+    new Set<string>();
+
+  for (
+    const amountValue of
+    amountValues
+  ) {
+    for (
+      const integrationValue of
+      integrationValues
+    ) {
+      for (
+        const orderValue of
+        orderValues
+      ) {
+        for (
+          const panValue of
+          panValues
+        ) {
+          for (
+            const subTypeValue of
+            subTypeValues
+          ) {
+            for (
+              const sourceTypeValue of
+              sourceTypeValues
+            ) {
+              const values = [
+                amountValue,
+                transaction.created_at,
+                transaction.currency,
+                transaction.error_occured,
+                transaction.has_parent_transaction,
+                transaction.id,
+                integrationValue,
+                transaction.is_3d_secure,
+                transaction.is_auth,
+                transaction.is_capture,
+                transaction.is_refunded,
+                transaction.is_standalone_payment,
+                transaction.is_voided,
+                orderValue,
+                transaction.owner,
+                transaction.pending,
+                panValue,
+                subTypeValue,
+                sourceTypeValue,
+                transaction.success,
+              ];
+
+              candidates.add(
+                values
+                  .map(toHmacValue)
+                  .join("")
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return [...candidates];
+}
+
+function safeCompareHex(
+  firstHex: string,
+  secondHex: string
+): boolean {
+  try {
+    const firstBuffer =
+      Buffer.from(
+        firstHex,
+        "hex"
+      );
+
+    const secondBuffer =
+      Buffer.from(
+        secondHex,
+        "hex"
+      );
+
+    if (
+      firstBuffer.length !==
+      secondBuffer.length
+    ) {
+      return false;
+    }
+
+    return timingSafeEqual(
+      firstBuffer,
+      secondBuffer
+    );
+  } catch {
+    return false;
+  }
+}
+
+function verifyCallbackHmac(
+  transaction: JsonRecord,
+  receivedHmac: string,
+  hmacSecret: string
+): boolean {
+  const normalizedReceivedHmac =
+    receivedHmac
+      .trim()
+      .toLowerCase();
+
+  if (
+    !/^[a-f0-9]{128}$/.test(
+      normalizedReceivedHmac
+    )
+  ) {
+    return false;
+  }
+
+  const candidates =
+    createCallbackHmacCandidates(
+      transaction
+    );
+
+  return candidates.some(
+    (candidate) => {
+      const calculatedHmac =
+        createHmac(
+          "sha512",
+          hmacSecret
+        )
+          .update(candidate)
+          .digest("hex");
+
+      return safeCompareHex(
+        calculatedHmac,
+        normalizedReceivedHmac
+      );
+    }
+  );
+}
+
+function getIntegrationId(
+  transaction: JsonRecord
+): string {
+  const integration =
+    asRecord(
+      transaction.integration
+    );
+
+  return getTextValue(
+    transaction.integration_id,
+    integration?.id,
+    transaction.integration
+  );
+}
+
+function getSpecialReference(
+  transaction: JsonRecord
+): string {
+  const order =
+    asRecord(
+      transaction.order
+    );
+
+  const intention =
+    asRecord(
+      transaction.intention
+    );
+
+  const paymentIntention =
+    asRecord(
+      transaction.payment_intention
+    );
+
+  const paymentKeyClaims =
+    asRecord(
+      transaction.payment_key_claims
+    );
+
+  const claimsExtra =
+    asRecord(
+      paymentKeyClaims?.extra
+    );
+
+  const extras =
+    asRecord(
+      transaction.extras
+    );
+
+  return getTextValue(
+    transaction.special_reference,
+    transaction.merchant_order_id,
+
+    order?.special_reference,
+    order?.merchant_order_id,
+
+    intention?.special_reference,
+    intention?.merchant_order_id,
+
+    paymentIntention?.special_reference,
+    paymentIntention?.merchant_order_id,
+
+    claimsExtra?.special_reference,
+    claimsExtra?.merchant_order_id,
+
+    extras?.special_reference,
+    extras?.merchant_order_id
+  );
+}
+
+function getIntentionId(
+  transaction: JsonRecord
+): string {
+  const intention =
+    asRecord(
+      transaction.intention
+    );
+
+  const paymentIntention =
+    asRecord(
+      transaction.payment_intention
+    );
+
+  const paymentKeyClaims =
+    asRecord(
+      transaction.payment_key_claims
+    );
+
+  const claimsExtra =
+    asRecord(
+      paymentKeyClaims?.extra
+    );
+
+  const intentionString =
+    typeof transaction.intention ===
+    "string"
+      ? transaction.intention
+      : "";
+
+  const paymentIntentionString =
+    typeof transaction.payment_intention ===
+    "string"
+      ? transaction.payment_intention
+      : "";
+
+  return getTextValue(
+    transaction.intention_id,
+    transaction.payment_intention_id,
+
+    intention?.id,
+    paymentIntention?.id,
+
+    intentionString,
+    paymentIntentionString,
+
+    claimsExtra?.intention_id,
+    claimsExtra?.payment_intention_id
+  );
+}
+
+async function findPaymentRecord(
+  transaction: JsonRecord,
+  callbackAmount: number,
+  callbackCurrency: string
+): Promise<PaymentRecord | null> {
+  const adminSupabase =
+    createAdminClient();
+
+  const selectedColumns = `
+    id,
+    amount_cents,
+    currency,
+    special_reference,
+    is_test
+  `;
+
+  const transactionId =
+    getTextValue(
+      transaction.id
+    );
+
+  if (transactionId) {
+    const {
+      data,
+      error,
+    } = await adminSupabase
+      .from(
+        "payment_transactions"
+      )
+      .select(selectedColumns)
+      .eq(
+        "paymob_transaction_id",
+        transactionId
+      )
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (data) {
+      return data as PaymentRecord;
+    }
+  }
+
+  const specialReference =
+    getSpecialReference(
+      transaction
+    );
+
+  if (specialReference) {
+    const {
+      data,
+      error,
+    } = await adminSupabase
+      .from(
+        "payment_transactions"
+      )
+      .select(selectedColumns)
+      .eq(
+        "special_reference",
+        specialReference
+      )
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (data) {
+      return data as PaymentRecord;
+    }
+  }
+
+  const intentionId =
+    getIntentionId(
+      transaction
+    );
+
+  if (intentionId) {
+    const {
+      data,
+      error,
+    } = await adminSupabase
+      .from(
+        "payment_transactions"
+      )
+      .select(selectedColumns)
+      .eq(
+        "paymob_intention_id",
+        intentionId
+      )
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (data) {
+      return data as PaymentRecord;
+    }
+  }
+
+  const oldestAllowedDate =
+    new Date(
+      Date.now() -
+        2 * 60 * 60 * 1000
+    ).toISOString();
+
+  const {
+    data: pendingPayments,
+    error: pendingPaymentsError,
+  } = await adminSupabase
+    .from(
+      "payment_transactions"
+    )
+    .select(selectedColumns)
+    .eq(
+      "status",
+      "pending"
+    )
+    .eq(
+      "amount_cents",
+      callbackAmount
+    )
+    .eq(
+      "currency",
+      callbackCurrency
+    )
+    .gte(
+      "created_at",
+      oldestAllowedDate
+    )
+    .order(
+      "created_at",
+      {
+        ascending: false,
+      }
+    )
+    .limit(2);
+
+  if (pendingPaymentsError) {
+    throw pendingPaymentsError;
+  }
+
+  if (
+    pendingPayments &&
+    pendingPayments.length === 1
+  ) {
+    return pendingPayments[0] as PaymentRecord;
+  }
+
+  return null;
+}
+
+export async function POST(
+  request: NextRequest
+) {
+  const hmacSecret =
+    process.env.PAYMOB_HMAC
+      ?.trim();
+
+  const cardIntegrationId =
+    Number(
+      process.env
+        .PAYMOB_INTEGRATION_ID
+        ?.trim()
+    );
+
+  const walletIntegrationId =
+    Number(
+      process.env
+        .PAYMOB_WALLET_INTEGRATION_ID
+        ?.trim() || "5790899"
+    );
+
+  if (
+    !hmacSecret ||
+    !Number.isInteger(
+      cardIntegrationId
+    ) ||
+    cardIntegrationId <= 0 ||
+    !Number.isInteger(
+      walletIntegrationId
+    ) ||
+    walletIntegrationId <= 0
+  ) {
+    console.error(
+      "Paymob webhook environment variables are missing."
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "إعدادات Webhook غير مكتملة.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+
+  const allowedIntegrationIds = [
+    cardIntegrationId,
+    walletIntegrationId,
+  ];
+
+  let payload: unknown;
+
+  try {
+    payload =
+      await request.json();
+  } catch {
+    console.error(
+      "Invalid Paymob webhook JSON."
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "بيانات Webhook غير صحيحة.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  const payloadRecord =
+    asRecord(payload);
+
+  if (!payloadRecord) {
+    return NextResponse.json(
+      {
+        error:
+          "بيانات Webhook غير مكتملة.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  const transaction =
+    asRecord(
+      payloadRecord.obj
+    ) ?? payloadRecord;
+
+  const receivedHmac =
+    request.nextUrl.searchParams
+      .get("hmac") ??
+    getTextValue(
+      payloadRecord.hmac
+    );
+
+  const transactionId =
+    getTextValue(
+      transaction.id
+    );
+
+  const callbackAmount =
+    Number(
+      transaction.amount_cents ??
+        transaction.amount
+    );
+
+  const callbackCurrency =
+    getTextValue(
+      transaction.currency
+    ).toUpperCase();
+
+  const callbackIntegrationId =
+    Number(
+      getIntegrationId(
+        transaction
+      )
+    );
+
+  if (
+    !transactionId ||
+    !Number.isInteger(
+      callbackAmount
+    ) ||
+    callbackAmount <= 0 ||
+    !callbackCurrency
+  ) {
+    console.error(
+      "Incomplete Paymob transaction data.",
+      {
+        transactionId,
+        callbackAmount,
+        callbackCurrency,
+        transactionKeys:
+          Object.keys(
+            transaction
+          ),
+      }
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "بيانات العملية غير مكتملة.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  const isHmacValid =
+    verifyCallbackHmac(
+      transaction,
+      receivedHmac,
+      hmacSecret
+    );
+
+  if (!isHmacValid) {
+    console.error(
+      "Invalid Paymob callback HMAC.",
+      {
+        transactionId,
+        callbackIntegrationId,
+
+        receivedHmacLength:
+          receivedHmac.length,
+
+        callbackShape: {
+          hasAmountCents:
+            transaction.amount_cents !==
+            undefined,
+
+          hasAmount:
+            transaction.amount !==
+            undefined,
+
+          hasIntegration:
+            transaction.integration !==
+            undefined,
+
+          hasIntegrationId:
+            transaction.integration_id !==
+            undefined,
+
+          hasNestedSourceData:
+            asRecord(
+              transaction.source_data
+            ) !== null,
+
+          hasFlatSourceData:
+            transaction.source_data_type !==
+              undefined ||
+            transaction.source_data_pan !==
+              undefined,
+        },
+      }
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "توقيع Webhook غير صحيح.",
+      },
+      {
+        status: 401,
+      }
+    );
+  }
+
+  if (
+    !Number.isInteger(
+      callbackIntegrationId
+    ) ||
+    !allowedIntegrationIds.includes(
+      callbackIntegrationId
+    )
+  ) {
+    console.error(
+      "Paymob integration ID mismatch.",
+      {
+        allowedIntegrationIds,
+        callbackIntegrationId,
+      }
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "تكامل الدفع غير مطابق.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  try {
+    const paymentRecord =
+      await findPaymentRecord(
+        transaction,
+        callbackAmount,
+        callbackCurrency
+      );
+
+    if (!paymentRecord) {
+      console.error(
+        "Paymob payment record was not found.",
+        {
+          transactionId,
+
+          specialReference:
+            getSpecialReference(
+              transaction
+            ),
+
+          intentionId:
+            getIntentionId(
+              transaction
+            ),
+
+          callbackAmount,
+          callbackCurrency,
+        }
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "عملية الدفع غير موجودة.",
+        },
+        {
+          status: 404,
+        }
+      );
+    }
+
+    if (
+      callbackAmount !==
+      Number(
+        paymentRecord.amount_cents
+      )
+    ) {
+      console.error(
+        "Paymob callback amount mismatch.",
+        {
+          callbackAmount,
+
+          storedAmount:
+            paymentRecord.amount_cents,
+        }
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "قيمة عملية الدفع غير مطابقة.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      callbackCurrency !==
+      paymentRecord.currency
+        .toUpperCase()
+    ) {
+      console.error(
+        "Paymob callback currency mismatch.",
+        {
+          callbackCurrency,
+
+          storedCurrency:
+            paymentRecord.currency,
+        }
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "عملة عملية الدفع غير مطابقة.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const order =
+      asRecord(
+        transaction.order
+      );
+
+    const sourceData =
+      asRecord(
+        transaction.source_data
+      );
+
+    const orderId =
+      getTextValue(
+        order?.id,
+        transaction.order
+      );
+
+    const paymentMethod = [
+      getTextValue(
+        sourceData?.type,
+        transaction.source_data_type
+      ),
+
+      getTextValue(
+        sourceData?.sub_type,
+        transaction.source_data_sub_type
+      ),
+    ]
+      .filter(Boolean)
+      .join(" - ");
+
+    const isSuccessful =
+      toBoolean(
+        transaction.success
+      ) &&
+      !toBoolean(
+        transaction.pending
+      ) &&
+      !toBoolean(
+        transaction.error_occured
+      ) &&
+      !toBoolean(
+        transaction.is_refunded
+      ) &&
+      !toBoolean(
+        transaction.is_voided
+      );
+
+    const adminSupabase =
+      createAdminClient();
+
+    const {
+      data,
+      error,
+    } = await adminSupabase.rpc(
+      "process_paymob_payment",
+      {
+        p_special_reference:
+          paymentRecord
+            .special_reference,
+
+        p_success:
+          isSuccessful,
+
+        p_paymob_transaction_id:
+          transactionId,
+
+        p_paymob_order_id:
+          orderId || null,
+
+        p_payment_method:
+          paymentMethod || null,
+
+        p_is_test:
+          paymentRecord.is_test,
+
+        p_raw_payload:
+          payloadRecord,
+      }
+    );
+
+    if (error) {
+      console.error(
+        "Paymob payment processing error:",
+        error
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر تحديث عملية الدفع.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const {
+      error: promoFinalizeError,
+    } = await adminSupabase.rpc(
+      "finalize_promo_redemption",
+      {
+        p_special_reference:
+          paymentRecord
+            .special_reference,
+
+        p_success:
+          isSuccessful,
+      }
+    );
+
+    if (promoFinalizeError) {
+      console.error(
+        "Promo redemption finalization error:",
+        promoFinalizeError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر تحديث استخدام كود الخصم.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    console.log(
+      "Paymob webhook processed successfully.",
+      {
+        transactionId,
+
+        specialReference:
+          paymentRecord
+            .special_reference,
+
+        callbackIntegrationId,
+
+        isSuccessful,
+      }
+    );
+
+    return NextResponse.json({
+      received: true,
+      processed: true,
+      success: isSuccessful,
+      result: data,
+    });
+  } catch (error) {
+    console.error(
+      "Paymob webhook processing error:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "حدث خطأ أثناء معالجة Webhook.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}
+===== app\api\paymob\return\route.ts =====
+import {
+  createHmac,
+  timingSafeEqual,
+} from "node:crypto";
+
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server";
+
+import { createClient } from "../../../../lib/supabase/server";
+import { createAdminClient } from "../../../../lib/supabase/admin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type PaymentRecord = {
+  id: string;
+  user_id: string;
+  amount_cents: number;
+  currency: string;
+  special_reference: string;
+  is_test: boolean;
+};
+
+function getFirstParam(
+  params: URLSearchParams,
+  names: string[]
+): string {
+  for (const name of names) {
+    const value =
+      params.get(name)?.trim();
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function toBoolean(
+  value: string
+): boolean {
+  return (
+    value.trim().toLowerCase() ===
+      "true" ||
+    value.trim() === "1"
+  );
+}
+
+function uniqueValues(
+  ...values: string[]
+): string[] {
+  return [
+    ...new Set(
+      values.filter(
+        (value) =>
+          value !== undefined &&
+          value !== null
+      )
+    ),
+  ];
+}
+
+/*
+ * دعم شكلي Paymob:
+ *
+ * الشكل الحالي:
+ * amount
+ * integration_id
+ * source_data_pan
+ *
+ * والشكل التقليدي:
+ * amount_cents
+ * integration
+ * source_data.pan
+ */
+function createHmacCandidates(
+  params: URLSearchParams
+): string[] {
+  const amountValues =
+    uniqueValues(
+      params.get("amount") ?? "",
+      params.get("amount_cents") ?? ""
+    );
+
+  const integrationValues =
+    uniqueValues(
+      params.get("integration_id") ??
+        "",
+      params.get("integration") ?? ""
+    );
+
+  const orderValues =
+    uniqueValues(
+      params.get("order") ?? "",
+      params.get("order_id") ?? ""
+    );
+
+  const panValues =
+    uniqueValues(
+      params.get(
+        "source_data_pan"
+      ) ?? "",
+
+      params.get(
+        "source_data.pan"
+      ) ?? "",
+
+      params.get(
+        "source_data[pan]"
+      ) ?? ""
+    );
+
+  const subTypeValues =
+    uniqueValues(
+      params.get(
+        "source_data_sub_type"
+      ) ?? "",
+
+      params.get(
+        "source_data.sub_type"
+      ) ?? "",
+
+      params.get(
+        "source_data[sub_type]"
+      ) ?? ""
+    );
+
+  const typeValues =
+    uniqueValues(
+      params.get(
+        "source_data_type"
+      ) ?? "",
+
+      params.get(
+        "source_data.type"
+      ) ?? "",
+
+      params.get(
+        "source_data[type]"
+      ) ?? ""
+    );
+
+  const candidates =
+    new Set<string>();
+
+  for (
+    const amountValue of
+    amountValues
+  ) {
+    for (
+      const integrationValue of
+      integrationValues
+    ) {
+      for (
+        const orderValue of
+        orderValues
+      ) {
+        for (
+          const panValue of
+          panValues
+        ) {
+          for (
+            const subTypeValue of
+            subTypeValues
+          ) {
+            for (
+              const typeValue of
+              typeValues
+            ) {
+              const values = [
+                amountValue,
+
+                params.get(
+                  "created_at"
+                ) ?? "",
+
+                params.get(
+                  "currency"
+                ) ?? "",
+
+                params.get(
+                  "error_occured"
+                ) ?? "",
+
+                params.get(
+                  "has_parent_transaction"
+                ) ?? "",
+
+                params.get("id") ?? "",
+
+                integrationValue,
+
+                params.get(
+                  "is_3d_secure"
+                ) ?? "",
+
+                params.get(
+                  "is_auth"
+                ) ?? "",
+
+                params.get(
+                  "is_capture"
+                ) ?? "",
+
+                params.get(
+                  "is_refunded"
+                ) ?? "",
+
+                params.get(
+                  "is_standalone_payment"
+                ) ?? "",
+
+                params.get(
+                  "is_voided"
+                ) ?? "",
+
+                orderValue,
+
+                params.get(
+                  "owner"
+                ) ?? "",
+
+                params.get(
+                  "pending"
+                ) ?? "",
+
+                panValue,
+
+                subTypeValue,
+
+                typeValue,
+
+                params.get(
+                  "success"
+                ) ?? "",
+              ];
+
+              candidates.add(
+                values.join("")
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return [...candidates];
+}
+
+function safeCompareHex(
+  firstHex: string,
+  secondHex: string
+): boolean {
+  try {
+    const firstBuffer =
+      Buffer.from(
+        firstHex,
+        "hex"
+      );
+
+    const secondBuffer =
+      Buffer.from(
+        secondHex,
+        "hex"
+      );
+
+    if (
+      firstBuffer.length !==
+      secondBuffer.length
+    ) {
+      return false;
+    }
+
+    return timingSafeEqual(
+      firstBuffer,
+      secondBuffer
+    );
+  } catch {
+    return false;
+  }
+}
+
+function verifyHmac(
+  params: URLSearchParams,
+  hmacSecret: string
+): boolean {
+  const receivedHmac =
+    params
+      .get("hmac")
+      ?.trim()
+      .toLowerCase() ?? "";
+
+  if (
+    !/^[a-f0-9]{128}$/.test(
+      receivedHmac
+    )
+  ) {
+    return false;
+  }
+
+  const candidates =
+    createHmacCandidates(params);
+
+  return candidates.some(
+    (candidate) => {
+      const calculatedHmac =
+        createHmac(
+          "sha512",
+          hmacSecret
+        )
+          .update(candidate)
+          .digest("hex");
+
+      return safeCompareHex(
+        calculatedHmac,
+        receivedHmac
+      );
+    }
+  );
+}
+
+function createResultUrl(
+  request: NextRequest
+): URL {
+  const siteUrl = (
+    process.env
+      .NEXT_PUBLIC_SITE_URL
+      ?.trim() ||
+    request.nextUrl.origin
+  ).replace(/\/+$/, "");
+
+  const resultUrl =
+    new URL(
+      "/payment/result",
+      siteUrl
+    );
+
+  request.nextUrl
+    .searchParams
+    .forEach(
+      (value, key) => {
+        resultUrl.searchParams.set(
+          key,
+          value
+        );
+      }
+    );
+
+  return resultUrl;
+}
+
+async function getCurrentUserId(): Promise<string> {
+  try {
+    const supabase =
+      await createClient();
+
+    const {
+      data,
+    } =
+      await supabase.auth
+        .getClaims();
+
+    const claims =
+      data?.claims as
+        | Record<
+            string,
+            unknown
+          >
+        | undefined;
+
+    return typeof claims?.sub ===
+      "string"
+      ? claims.sub
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+async function findPaymentRecord(
+  params: URLSearchParams,
+  amountCents: number,
+  currency: string
+): Promise<PaymentRecord | null> {
+  const adminSupabase =
+    createAdminClient();
+
+  const columns = `
+    id,
+    user_id,
+    amount_cents,
+    currency,
+    special_reference,
+    is_test
+  `;
+
+  /*
+   * Paymob تعرض هذه القيمة في لوحة التحكم
+   * باسم Merchant Order ID.
+   */
+  const specialReference =
+    getFirstParam(
+      params,
+      [
+        "merchant_order_id",
+        "special_reference",
+        "merchant_order_reference",
+      ]
+    );
+
+  if (specialReference) {
+    const {
+      data,
+      error,
+    } = await adminSupabase
+      .from(
+        "payment_transactions"
+      )
+      .select(columns)
+      .eq(
+        "special_reference",
+        specialReference
+      )
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (data) {
+      return data as PaymentRecord;
+    }
+  }
+
+  /*
+   * لو مرجع العملية لم يصل،
+   * نبحث داخل عمليات المستخدم الحالي فقط.
+   *
+   * لا نقبل النتيجة إلا عند وجود
+   * عملية Pending واحدة مطابقة.
+   */
+  const userId =
+    await getCurrentUserId();
+
+  if (!userId) {
+    return null;
+  }
+
+  const oldestAllowedDate =
+    new Date(
+      Date.now() -
+        30 * 60 * 1000
+    ).toISOString();
+
+  const {
+    data,
+    error,
+  } = await adminSupabase
+    .from(
+      "payment_transactions"
+    )
+    .select(columns)
+    .eq(
+      "user_id",
+      userId
+    )
+    .eq(
+      "status",
+      "pending"
+    )
+    .eq(
+      "amount_cents",
+      amountCents
+    )
+    .eq(
+      "currency",
+      currency
+    )
+    .gte(
+      "created_at",
+      oldestAllowedDate
+    )
+    .order(
+      "created_at",
+      {
+        ascending: false,
+      }
+    )
+    .limit(2);
+
+  if (error) {
+    throw error;
+  }
+
+  if (
+    data &&
+    data.length === 1
+  ) {
+    return data[0] as PaymentRecord;
+  }
+
+  return null;
+}
+
+export async function GET(
+  request: NextRequest
+) {
+  const resultUrl =
+    createResultUrl(request);
+
+  const hmacSecret =
+    process.env.PAYMOB_HMAC
+      ?.trim();
+
+  const expectedIntegrationId =
+    Number(
+      process.env
+        .PAYMOB_INTEGRATION_ID
+    );
+
+  if (
+    !hmacSecret ||
+    !Number.isInteger(
+      expectedIntegrationId
+    )
+  ) {
+    resultUrl.searchParams.set(
+      "verified",
+      "false"
+    );
+
+    resultUrl.searchParams.set(
+      "verification_error",
+      "missing_configuration"
+    );
+
+    return NextResponse.redirect(
+      resultUrl,
+      303
+    );
+  }
+
+  const params =
+    request.nextUrl.searchParams;
+
+  /*
+   * أول وأهم خطوة:
+   * التحقق من HMAC.
+   */
+  const isHmacValid =
+    verifyHmac(
+      params,
+      hmacSecret
+    );
+
+  if (!isHmacValid) {
+    console.error(
+      "Invalid Paymob response callback HMAC."
+    );
+
+    resultUrl.searchParams.set(
+      "verified",
+      "false"
+    );
+
+    resultUrl.searchParams.set(
+      "verification_error",
+      "invalid_hmac"
+    );
+
+    return NextResponse.redirect(
+      resultUrl,
+      303
+    );
+  }
+
+  const transactionId =
+    getFirstParam(
+      params,
+      ["id", "transaction_id"]
+    );
+
+  const callbackAmount =
+    Number(
+      getFirstParam(
+        params,
+        [
+          "amount_cents",
+          "amount",
+        ]
+      )
+    );
+
+  const callbackCurrency =
+    getFirstParam(
+      params,
+      ["currency"]
+    ).toUpperCase();
+
+  const callbackIntegrationId =
+    Number(
+      getFirstParam(
+        params,
+        [
+          "integration_id",
+          "integration",
+        ]
+      )
+    );
+
+  if (
+    !transactionId ||
+    !Number.isInteger(
+      callbackAmount
+    ) ||
+    callbackAmount <= 0 ||
+    !callbackCurrency ||
+    !Number.isInteger(
+      callbackIntegrationId
+    )
+  ) {
+    resultUrl.searchParams.set(
+      "verified",
+      "false"
+    );
+
+    resultUrl.searchParams.set(
+      "verification_error",
+      "invalid_callback_data"
+    );
+
+    return NextResponse.redirect(
+      resultUrl,
+      303
+    );
+  }
+
+  if (
+    callbackIntegrationId !==
+    expectedIntegrationId
+  ) {
+    resultUrl.searchParams.set(
+      "verified",
+      "false"
+    );
+
+    resultUrl.searchParams.set(
+      "verification_error",
+      "integration_mismatch"
+    );
+
+    return NextResponse.redirect(
+      resultUrl,
+      303
+    );
+  }
+
+  try {
+    const paymentRecord =
+      await findPaymentRecord(
+        params,
+        callbackAmount,
+        callbackCurrency
+      );
+
+    if (!paymentRecord) {
+      console.error(
+        "Payment record was not found from response callback.",
+        {
+          transactionId,
+          callbackAmount,
+          callbackCurrency,
+        }
+      );
+
+      resultUrl.searchParams.set(
+        "verified",
+        "false"
+      );
+
+      resultUrl.searchParams.set(
+        "verification_error",
+        "payment_not_found"
+      );
+
+      return NextResponse.redirect(
+        resultUrl,
+        303
+      );
+    }
+
+    if (
+      callbackAmount !==
+      Number(
+        paymentRecord.amount_cents
+      )
+    ) {
+      resultUrl.searchParams.set(
+        "verified",
+        "false"
+      );
+
+      resultUrl.searchParams.set(
+        "verification_error",
+        "amount_mismatch"
+      );
+
+      return NextResponse.redirect(
+        resultUrl,
+        303
+      );
+    }
+
+    if (
+      callbackCurrency !==
+      paymentRecord.currency
+        .toUpperCase()
+    ) {
+      resultUrl.searchParams.set(
+        "verified",
+        "false"
+      );
+
+      resultUrl.searchParams.set(
+        "verification_error",
+        "currency_mismatch"
+      );
+
+      return NextResponse.redirect(
+        resultUrl,
+        303
+      );
+    }
+
+    const success =
+      toBoolean(
+        params.get("success") ??
+          ""
+      );
+
+    const pending =
+      toBoolean(
+        params.get("pending") ??
+          ""
+      );
+
+    const errorOccurred =
+      toBoolean(
+        params.get(
+          "error_occured"
+        ) ?? ""
+      );
+
+    const isRefunded =
+      toBoolean(
+        params.get(
+          "is_refunded"
+        ) ?? ""
+      );
+
+    const isVoided =
+      toBoolean(
+        params.get(
+          "is_voided"
+        ) ?? ""
+      );
+
+    const isSuccessful =
+      success &&
+      !pending &&
+      !errorOccurred &&
+      !isRefunded &&
+      !isVoided;
+
+    const orderId =
+      getFirstParam(
+        params,
+        ["order", "order_id"]
+      );
+
+    const paymentMethod = [
+      getFirstParam(
+        params,
+        [
+          "source_data_type",
+          "source_data.type",
+          "source_data[type]",
+        ]
+      ),
+
+      getFirstParam(
+        params,
+        [
+          "source_data_sub_type",
+          "source_data.sub_type",
+          "source_data[sub_type]",
+        ]
+      ),
+    ]
+      .filter(Boolean)
+      .join(" - ");
+
+    const rawPayload =
+      Object.fromEntries(
+        params.entries()
+      );
+
+    const adminSupabase =
+      createAdminClient();
+
+    const {
+      error,
+    } = await adminSupabase.rpc(
+      "process_paymob_payment",
+      {
+        p_special_reference:
+          paymentRecord
+            .special_reference,
+
+        p_success:
+          isSuccessful,
+
+        p_paymob_transaction_id:
+          transactionId,
+
+        p_paymob_order_id:
+          orderId || null,
+
+        p_payment_method:
+          paymentMethod || null,
+
+        p_is_test:
+          paymentRecord.is_test,
+
+        p_raw_payload:
+          rawPayload,
+      }
+    );
+
+    if (error) {
+      console.error(
+        "Paymob response callback processing error:",
+        error
+      );
+
+      resultUrl.searchParams.set(
+        "verified",
+        "false"
+      );
+
+      resultUrl.searchParams.set(
+        "verification_error",
+        "database_update_failed"
+      );
+
+      return NextResponse.redirect(
+        resultUrl,
+        303
+      );
+    }
+
+    console.log(
+      "Paymob response callback processed successfully.",
+      {
+        transactionId,
+        specialReference:
+          paymentRecord
+            .special_reference,
+        isSuccessful,
+      }
+    );
+
+    resultUrl.searchParams.set(
+      "verified",
+      "true"
+    );
+
+    resultUrl.searchParams.set(
+      "reference",
+      paymentRecord
+        .special_reference
+    );
+
+    resultUrl.searchParams.set(
+      "payment_success",
+      isSuccessful
+        ? "true"
+        : "false"
+    );
+
+    return NextResponse.redirect(
+      resultUrl,
+      303
+    );
+  } catch (error) {
+    console.error(
+      "Unexpected Paymob response callback error:",
+      error
+    );
+
+    resultUrl.searchParams.set(
+      "verified",
+      "false"
+    );
+
+    resultUrl.searchParams.set(
+      "verification_error",
+      "unexpected_error"
+    );
+
+    return NextResponse.redirect(
+      resultUrl,
+      303
+    );
+  }
+}
+===== app\payment\result\page.tsx =====
+import Link from "next/link";
+import { redirect } from "next/navigation";
+
+import {
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  ReceiptText,
+  RefreshCw,
+  XCircle,
+} from "lucide-react";
+
+import Navbar from "../../../components/layout/Navbar";
+import Footer from "../../../components/layout/Footer";
+import { createClient } from "../../../lib/supabase/server";
+
+export const dynamic = "force-dynamic";
+
+type PaymentStatus =
+  | "pending"
+  | "paid"
+  | "failed"
+  | "cancelled"
+  | "refunded";
+
+type PaymentRecord = {
+  id: string;
+  plan_key: "monthly" | "yearly";
+  status: PaymentStatus;
+  amount_cents: number;
+  currency: string;
+  special_reference: string;
+  created_at: string;
+  paid_at: string | null;
+};
+
+type SubscriptionRecord = {
+  status: string;
+  starts_at: string;
+  ends_at: string;
+};
+
+const planNames = {
+  monthly: "الباقة الاحترافية الشهرية",
+  yearly: "الباقة السنوية",
+};
+
+function formatDate(value: string | null) {
+  if (!value) {
+    return "غير محدد";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "غير محدد";
+  }
+
+  return new Intl.DateTimeFormat("ar-EG", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatAmount(
+  amountCents: number,
+  currency: string
+) {
+  return new Intl.NumberFormat("ar-EG", {
+    style: "currency",
+    currency: currency || "EGP",
+  }).format(amountCents / 100);
+}
+
+export default async function PaymentResultPage() {
+  const supabase = await createClient();
+
+  const {
+    data: claimsData,
+    error: claimsError,
+  } = await supabase.auth.getClaims();
+
+  if (
+    claimsError ||
+    !claimsData?.claims
+  ) {
+    redirect("/login");
+  }
+
+  const claims =
+    claimsData.claims as Record<
+      string,
+      unknown
+    >;
+
+  const userId =
+    typeof claims.sub === "string"
+      ? claims.sub
+      : "";
+
+  if (!userId) {
+    redirect("/login");
+  }
+
+  const {
+    data: paymentData,
+    error: paymentError,
+  } = await supabase
+    .from("payment_transactions")
+    .select(
+      `
+        id,
+        plan_key,
+        status,
+        amount_cents,
+        currency,
+        special_reference,
+        created_at,
+        paid_at
+      `
+    )
+    .eq("user_id", userId)
+    .order("created_at", {
+      ascending: false,
+    })
+    .limit(1)
+    .maybeSingle();
+
+  if (paymentError) {
+    console.error(
+      "Payment result loading error:",
+      paymentError
+    );
+  }
+
+  const payment =
+    paymentData as PaymentRecord | null;
+
+  let subscription:
+    | SubscriptionRecord
+    | null = null;
+
+  if (payment?.status === "paid") {
+    const {
+      data: subscriptionData,
+      error: subscriptionError,
+    } = await supabase
+      .from("plan_subscriptions")
+      .select(
+        `
+          status,
+          starts_at,
+          ends_at
+        `
+      )
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .order("ends_at", {
+        ascending: false,
+      })
+      .limit(1)
+      .maybeSingle();
+
+    if (subscriptionError) {
+      console.error(
+        "Subscription result loading error:",
+        subscriptionError
+      );
+    }
+
+    subscription =
+      subscriptionData as SubscriptionRecord | null;
+  }
+
+  const isPending =
+    payment?.status === "pending";
+
+  const isPaid =
+    payment?.status === "paid";
+
+  const isFailed =
+    payment &&
+    [
+      "failed",
+      "cancelled",
+      "refunded",
+    ].includes(payment.status);
+
+  return (
+    <main className="min-h-screen bg-[#09090B] text-white">
+      {isPending && (
+        <meta
+          httpEquiv="refresh"
+          content="4"
+        />
+      )}
+
+      <Navbar />
+
+      <section className="relative overflow-hidden px-6 py-24">
+        <div className="absolute right-0 top-0 h-96 w-96 rounded-full bg-purple-600/10 blur-[130px]" />
+
+        <div className="absolute bottom-0 left-0 h-96 w-96 rounded-full bg-indigo-600/10 blur-[130px]" />
+
+        <div className="relative mx-auto max-w-3xl">
+          <div className="text-center">
+            <span className="inline-flex items-center gap-2 rounded-full border border-purple-500/20 bg-purple-500/10 px-4 py-2 text-sm font-bold text-purple-300">
+              <ReceiptText size={17} />
+              نتيجة عملية الدفع
+            </span>
+
+            <h1 className="mt-6 text-4xl font-black md:text-5xl">
+              متابعة حالة الاشتراك
+            </h1>
+
+            <p className="mx-auto mt-4 max-w-xl leading-8 text-zinc-400">
+              يتم تأكيد العملية بأمان من خلال
+              Paymob وتحديث اشتراكك داخل المنصة.
+            </p>
+          </div>
+
+          {!payment || paymentError ? (
+            <div className="mt-12 rounded-3xl border border-yellow-500/20 bg-yellow-500/[0.05] p-8 text-center">
+              <Clock3
+                size={58}
+                className="mx-auto text-yellow-400"
+              />
+
+              <h2 className="mt-6 text-3xl font-black">
+                لم نجد عملية دفع حديثة
+              </h2>
+
+              <p className="mt-4 leading-8 text-zinc-400">
+                ارجع إلى صفحة الأسعار وابدأ
+                عملية الاشتراك مرة أخرى.
+              </p>
+
+              <Link
+                href="/pricing"
+                className="mt-8 inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 px-7 py-4 font-black"
+              >
+                العودة إلى الأسعار
+                <ArrowRight size={19} />
+              </Link>
+            </div>
+          ) : (
+            <div className="mt-12 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04]">
+              {isPaid && (
+                <div className="border-b border-emerald-500/20 bg-emerald-500/10 px-7 py-8 text-center">
+                  <CheckCircle2
+                    size={64}
+                    className="mx-auto text-emerald-400"
+                  />
+
+                  <h2 className="mt-5 text-3xl font-black text-emerald-300">
+                    تم الدفع وتفعيل الاشتراك
+                  </h2>
+
+                  <p className="mt-3 text-emerald-200/70">
+                    يمكنك الآن الاستفادة من
+                    محتوى المنصة.
+                  </p>
+                </div>
+              )}
+
+              {isPending && (
+                <div className="border-b border-yellow-500/20 bg-yellow-500/[0.07] px-7 py-8 text-center">
+                  <RefreshCw
+                    size={60}
+                    className="mx-auto animate-spin text-yellow-400"
+                  />
+
+                  <h2 className="mt-5 text-3xl font-black text-yellow-300">
+                    جاري تأكيد عملية الدفع
+                  </h2>
+
+                  <p className="mt-3 leading-7 text-yellow-100/60">
+                    انتظر قليلًا، سيتم تحديث
+                    الصفحة تلقائيًا.
+                  </p>
+                </div>
+              )}
+
+              {isFailed && (
+                <div className="border-b border-red-500/20 bg-red-500/[0.07] px-7 py-8 text-center">
+                  <XCircle
+                    size={64}
+                    className="mx-auto text-red-400"
+                  />
+
+                  <h2 className="mt-5 text-3xl font-black text-red-300">
+                    لم تكتمل عملية الدفع
+                  </h2>
+
+                  <p className="mt-3 leading-7 text-red-100/60">
+                    لم يتم تفعيل الاشتراك ويمكنك
+                    إعادة المحاولة.
+                  </p>
+                </div>
+              )}
+
+              <div className="p-7 md:p-9">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+                    <p className="text-sm text-zinc-500">
+                      الباقة
+                    </p>
+
+                    <p className="mt-2 font-black">
+                      {planNames[
+                        payment.plan_key
+                      ]}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+                    <p className="text-sm text-zinc-500">
+                      المبلغ
+                    </p>
+
+                    <p
+                      dir="ltr"
+                      className="mt-2 text-right font-black"
+                    >
+                      {formatAmount(
+                        payment.amount_cents,
+                        payment.currency
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+                    <p className="text-sm text-zinc-500">
+                      رقم العملية
+                    </p>
+
+                    <p
+                      dir="ltr"
+                      className="mt-2 break-all text-right font-mono text-sm font-bold text-purple-300"
+                    >
+                      {
+                        payment.special_reference
+                      }
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+                    <p className="text-sm text-zinc-500">
+                      تاريخ إنشاء العملية
+                    </p>
+
+                    <p className="mt-2 font-bold">
+                      {formatDate(
+                        payment.created_at
+                      )}
+                    </p>
+                  </div>
+
+                  {isPaid &&
+                    subscription && (
+                      <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.05] p-5 sm:col-span-2">
+                        <p className="text-sm text-emerald-400">
+                          الاشتراك فعال حتى
+                        </p>
+
+                        <p className="mt-2 text-xl font-black text-emerald-300">
+                          {formatDate(
+                            subscription.ends_at
+                          )}
+                        </p>
+                      </div>
+                    )}
+                </div>
+
+                <div className="mt-8 grid gap-3 sm:grid-cols-2">
+                  <Link
+                    href="/dashboard"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 font-black transition hover:brightness-110"
+                  >
+                    الذهاب إلى لوحة التحكم
+                    <ArrowRight size={19} />
+                  </Link>
+
+                  <Link
+                    href="/pricing"
+                    className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-4 font-bold transition hover:border-purple-500/40"
+                  >
+                    العودة إلى الأسعار
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <Footer />
+    </main>
+  );
+}
+===== app\api\paymob\create-intention\route.ts =====
+import { randomUUID } from "node:crypto";
+
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server";
+
+import { createClient } from "../../../../lib/supabase/server";
+import { createAdminClient } from "../../../../lib/supabase/admin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type PlanKey = "monthly" | "yearly";
+
+type CheckoutRequestBody = {
+  plan?: unknown;
+  fullName?: unknown;
+  email?: unknown;
+  phone?: unknown;
+  promoCode?: unknown;
+};
+
+type PlanRow = {
+  plan_key: string;
+  name: string;
+  price_cents: number;
+  currency: string;
+  description: string;
+  paymob_enabled: boolean;
+  is_published: boolean;
+};
+
+type PromoReservationRow = {
+  promo_code_id: string;
+  normalized_code: string;
+  discount_amount_cents: number;
+  final_amount_cents: number;
+};
+
+type PaymobResponse = {
+  id?: unknown;
+  client_secret?: unknown;
+};
+
+function isValidEmail(
+  email: string
+) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    email
+  );
+}
+
+function normalizeEgyptianPhone(
+  phone: string
+) {
+  const cleanedPhone =
+    phone.replace(
+      /[^\d+]/g,
+      ""
+    );
+
+  if (
+    /^01\d{9}$/.test(
+      cleanedPhone
+    )
+  ) {
+    return `+2${cleanedPhone}`;
+  }
+
+  if (
+    /^20\d{10}$/.test(
+      cleanedPhone
+    )
+  ) {
+    return `+${cleanedPhone}`;
+  }
+
+  if (
+    /^\+20\d{10}$/.test(
+      cleanedPhone
+    )
+  ) {
+    return cleanedPhone;
+  }
+
+  return null;
+}
+
+function splitFullName(
+  fullName: string
+) {
+  const nameParts =
+    fullName
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+
+  const firstName =
+    nameParts[0] ||
+    "Customer";
+
+  const lastName =
+    nameParts
+      .slice(1)
+      .join(" ") ||
+    firstName;
+
+  return {
+    firstName,
+    lastName,
+  };
+}
+
+function getPositiveIntegrationId(
+  value: string | undefined,
+  fallback: number
+) {
+  const parsedValue =
+    Number(value?.trim());
+
+  if (
+    Number.isInteger(
+      parsedValue
+    ) &&
+    parsedValue > 0
+  ) {
+    return parsedValue;
+  }
+
+  return fallback;
+}
+
+function getEnvironmentVariables() {
+  const secretKey =
+    process.env
+      .PAYMOB_SECRET_KEY
+      ?.trim();
+
+  const publicKey =
+    process.env
+      .PAYMOB_PUBLIC_KEY
+      ?.trim();
+
+  const cardIntegrationId =
+    getPositiveIntegrationId(
+      process.env
+        .PAYMOB_INTEGRATION_ID,
+      5786780
+    );
+
+  const walletIntegrationId =
+    getPositiveIntegrationId(
+      process.env
+        .PAYMOB_WALLET_INTEGRATION_ID,
+      5790899
+    );
+
+  if (
+    !secretKey ||
+    !publicKey
+  ) {
+    return null;
+  }
+
+  return {
+    secretKey,
+    publicKey,
+    cardIntegrationId,
+    walletIntegrationId,
+  };
+}
+
+function getPromoErrorMessage(
+  errorMessage: string
+) {
+  const normalizedMessage =
+    errorMessage.toLowerCase();
+
+  if (
+    normalizedMessage.includes(
+      "كود الخصم"
+    ) ||
+    normalizedMessage.includes(
+      "الحد الأقصى"
+    ) ||
+    normalizedMessage.includes(
+      "استخدمت"
+    ) ||
+    normalizedMessage.includes(
+      "الباقة"
+    )
+  ) {
+    return errorMessage;
+  }
+
+  return "تعذر تطبيق كود الخصم.";
+}
+
+export async function POST(
+  request: NextRequest
+) {
+  const environmentVariables =
+    getEnvironmentVariables();
+
+  if (!environmentVariables) {
+    return NextResponse.json(
+      {
+        error:
+          "إعدادات Paymob غير مكتملة على السيرفر.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+
+  const supabase =
+    await createClient();
+
+  const {
+    data: claimsData,
+    error: claimsError,
+  } =
+    await supabase.auth.getClaims();
+
+  if (
+    claimsError ||
+    !claimsData?.claims
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "يجب تسجيل الدخول قبل إتمام الاشتراك.",
+      },
+      {
+        status: 401,
+      }
+    );
+  }
+
+  const claims =
+    claimsData.claims as Record<
+      string,
+      unknown
+    >;
+
+  const userId =
+    typeof claims.sub ===
+    "string"
+      ? claims.sub
+      : "";
+
+  if (!userId) {
+    return NextResponse.json(
+      {
+        error:
+          "تعذر التعرف على حساب المستخدم.",
+      },
+      {
+        status: 401,
+      }
+    );
+  }
+
+  let body:
+    CheckoutRequestBody;
+
+  try {
+    body =
+      (await request.json()) as CheckoutRequestBody;
+  } catch {
+    return NextResponse.json(
+      {
+        error:
+          "بيانات الطلب غير صحيحة.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  const plan:
+    PlanKey | null =
+    body.plan === "yearly"
+      ? "yearly"
+      : body.plan ===
+          "monthly"
+        ? "monthly"
+        : null;
+
+  const fullName =
+    typeof body.fullName ===
+    "string"
+      ? body.fullName.trim()
+      : "";
+
+  const email =
+    typeof body.email ===
+    "string"
+      ? body.email
+          .trim()
+          .toLowerCase()
+      : "";
+
+  const phone =
+    typeof body.phone ===
+    "string"
+      ? body.phone.trim()
+      : "";
+
+  const promoCode =
+    typeof body.promoCode ===
+    "string"
+      ? body.promoCode
+          .trim()
+          .toUpperCase()
+      : "";
+
+  if (!plan) {
+    return NextResponse.json(
+      {
+        error:
+          "الباقة المختارة غير صحيحة.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  if (
+    fullName.length < 3
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "اكتب الاسم بالكامل.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  if (
+    !isValidEmail(email)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "اكتب بريدًا إلكترونيًا صحيحًا.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  const normalizedPhone =
+    normalizeEgyptianPhone(
+      phone
+    );
+
+  if (!normalizedPhone) {
+    return NextResponse.json(
+      {
+        error:
+          "اكتب رقم هاتف مصري صحيحًا.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  const adminSupabase =
+    createAdminClient();
+
+  const {
+    data: planData,
+    error: planError,
+  } = await adminSupabase
+    .from(
+      "subscription_plans"
+    )
+    .select(
+      `
+        plan_key,
+        name,
+        price_cents,
+        currency,
+        description,
+        paymob_enabled,
+        is_published
+      `
+    )
+    .eq(
+      "plan_key",
+      plan
+    )
+    .eq(
+      "is_published",
+      true
+    )
+    .eq(
+      "paymob_enabled",
+      true
+    )
+    .maybeSingle();
+
+  if (
+    planError ||
+    !planData
+  ) {
+    console.error(
+      "Subscription plan load error:",
+      planError
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "الباقة غير متاحة للدفع حاليًا.",
+      },
+      {
+        status: 404,
+      }
+    );
+  }
+
+  const selectedPlan =
+    planData as PlanRow;
+
+  const originalAmountCents =
+    Number(
+      selectedPlan.price_cents
+    );
+
+  const currency =
+    selectedPlan.currency
+      .trim()
+      .toUpperCase();
+
+  if (
+    !Number.isInteger(
+      originalAmountCents
+    ) ||
+    originalAmountCents <= 0
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "سعر الباقة غير صحيح.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  if (
+    currency !== "EGP"
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "عملة الباقة غير مدعومة حاليًا.",
+      },
+      {
+        status: 400,
+      }
+    );
+  }
+
+  const {
+    firstName,
+    lastName,
+  } =
+    splitFullName(fullName);
+
+  const siteUrl = (
+    process.env
+      .NEXT_PUBLIC_SITE_URL
+      ?.trim() ||
+    request.nextUrl.origin
+  ).replace(/\/+$/, "");
+
+  const specialReference =
+    `IA-${Date.now()}-` +
+    randomUUID()
+      .replace(/-/g, "")
+      .slice(0, 10)
+      .toUpperCase();
+
+  const {
+    data: paymentRecord,
+    error:
+      paymentInsertError,
+  } = await adminSupabase
+    .from(
+      "payment_transactions"
+    )
+    .insert({
+      user_id: userId,
+      provider: "paymob",
+      plan_key: plan,
+      status: "pending",
+
+      amount_cents:
+        originalAmountCents,
+
+      original_amount_cents:
+        originalAmountCents,
+
+      discount_amount_cents:
+        0,
+
+      currency,
+
+      special_reference:
+        specialReference,
+
+      customer_email:
+        email,
+
+      customer_phone:
+        normalizedPhone,
+
+      is_test: true,
+
+      hmac_verified:
+        false,
+    })
+    .select("id")
+    .single();
+
+  if (
+    paymentInsertError ||
+    !paymentRecord
+  ) {
+    console.error(
+      "Payment record insert error:",
+      paymentInsertError
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "تعذر تسجيل عملية الدفع داخل الموقع.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+
+  const paymentRecordId =
+    String(
+      paymentRecord.id
+    );
+
+  async function markPaymentFailed(
+    stage: string,
+    response?: unknown
+  ) {
+    await adminSupabase
+      .from(
+        "payment_transactions"
+      )
+      .update({
+        status: "failed",
+
+        raw_payload: {
+          stage,
+
+          response:
+            response ?? null,
+        },
+      })
+      .eq(
+        "id",
+        paymentRecordId
+      );
+
+    if (promoCode) {
+      await adminSupabase.rpc(
+        "finalize_promo_redemption",
+        {
+          p_special_reference:
+            specialReference,
+
+          p_success:
+            false,
+        }
+      );
+    }
+  }
+
+  let finalAmountCents =
+    originalAmountCents;
+
+  let discountAmountCents =
+    0;
+
+  let appliedPromoCode =
+    "";
+
+  if (promoCode) {
+    const {
+      data:
+        promoReservationData,
+
+      error:
+        promoReservationError,
+    } =
+      await adminSupabase.rpc(
+        "reserve_promo_code",
+        {
+          p_code:
+            promoCode,
+
+          p_user_id:
+            userId,
+
+          p_plan_key:
+            plan,
+
+          p_original_amount_cents:
+            originalAmountCents,
+
+          p_payment_transaction_id:
+            paymentRecordId,
+
+          p_special_reference:
+            specialReference,
+        }
+      );
+
+    const reservationValue =
+      Array.isArray(
+        promoReservationData
+      )
+        ? promoReservationData[0]
+        : promoReservationData;
+
+    const reservation =
+      reservationValue as
+        | PromoReservationRow
+        | null;
+
+    if (
+      promoReservationError ||
+      !reservation
+    ) {
+      console.error(
+        "Promo code reservation error:",
+        promoReservationError
+      );
+
+      await markPaymentFailed(
+        "promo_code_rejected",
+        promoReservationError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            getPromoErrorMessage(
+              promoReservationError
+                ?.message ||
+                "تعذر تطبيق كود الخصم."
+            ),
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    finalAmountCents =
+      Number(
+        reservation.final_amount_cents
+      );
+
+    discountAmountCents =
+      Number(
+        reservation.discount_amount_cents
+      );
+
+    appliedPromoCode =
+      reservation.normalized_code;
+
+    if (
+      !Number.isInteger(
+        finalAmountCents
+      ) ||
+      finalAmountCents <= 0 ||
+      !Number.isInteger(
+        discountAmountCents
+      ) ||
+      discountAmountCents <=
+        0
+    ) {
+      await markPaymentFailed(
+        "invalid_discount_result",
+        reservation
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر حساب قيمة الخصم.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+  }
+
+  try {
+    const itemDescription =
+      appliedPromoCode
+        ? `${selectedPlan.description} - كود الخصم: ${appliedPromoCode}`
+        : selectedPlan.description;
+
+    const paymentMethods = [
+      environmentVariables
+        .cardIntegrationId,
+
+      environmentVariables
+        .walletIntegrationId,
+    ];
+
+    const paymobResponse =
+      await fetch(
+        "https://accept.paymob.com/v1/intention/",
+        {
+          method: "POST",
+
+          headers: {
+            Authorization:
+              `Token ${environmentVariables.secretKey}`,
+
+            "Content-Type":
+              "application/json",
+          },
+
+          body:
+            JSON.stringify({
+              amount:
+                finalAmountCents,
+
+              currency,
+
+              payment_methods:
+                paymentMethods,
+
+              items: [
+                {
+                  name:
+                    selectedPlan.name,
+
+                  amount:
+                    finalAmountCents,
+
+                  description:
+                    itemDescription,
+
+                  quantity: 1,
+                },
+              ],
+
+              billing_data: {
+                apartment:
+                  "NA",
+
+                first_name:
+                  firstName,
+
+                last_name:
+                  lastName,
+
+                street: "NA",
+                building: "NA",
+
+                phone_number:
+                  normalizedPhone,
+
+                city: "Cairo",
+                country: "EG",
+
+                email,
+
+                floor: "NA",
+                state: "Cairo",
+              },
+
+              special_reference:
+                specialReference,
+
+              notification_url:
+                `${siteUrl}/api/paymob/webhook`,
+
+              redirection_url:
+                `${siteUrl}/api/paymob/return`,
+            }),
+
+          cache: "no-store",
+        }
+      );
+
+    const responseText =
+      await paymobResponse.text();
+
+    let paymobData:
+      PaymobResponse = {};
+
+    try {
+      paymobData =
+        JSON.parse(
+          responseText
+        ) as PaymobResponse;
+    } catch {
+      paymobData = {};
+    }
+
+    if (
+      !paymobResponse.ok
+    ) {
+      console.error(
+        "Paymob intention error:",
+        paymobResponse.status,
+        paymobData
+      );
+
+      await markPaymentFailed(
+        "create_intention",
+        {
+          status:
+            paymobResponse.status,
+
+          response:
+            paymobData,
+        }
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر إنشاء عملية الدفع. حاول مرة أخرى.",
+        },
+        {
+          status: 502,
+        }
+      );
+    }
+
+    const clientSecret =
+      typeof paymobData
+        .client_secret ===
+      "string"
+        ? paymobData
+            .client_secret
+        : "";
+
+    if (!clientSecret) {
+      await markPaymentFailed(
+        "missing_client_secret",
+        paymobData
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "لم يتم استلام رابط الدفع من Paymob.",
+        },
+        {
+          status: 502,
+        }
+      );
+    }
+
+    const paymobIntentionId =
+      paymobData.id !==
+        undefined &&
+      paymobData.id !== null
+        ? String(
+            paymobData.id
+          )
+        : null;
+
+    await adminSupabase
+      .from(
+        "payment_transactions"
+      )
+      .update({
+        paymob_intention_id:
+          paymobIntentionId,
+
+        raw_payload: {
+          stage:
+            "intention_created",
+
+          intention_id:
+            paymobIntentionId,
+
+          original_amount_cents:
+            originalAmountCents,
+
+          discount_amount_cents:
+            discountAmountCents,
+
+          final_amount_cents:
+            finalAmountCents,
+
+          promo_code:
+            appliedPromoCode ||
+            null,
+
+          payment_methods:
+            paymentMethods,
+        },
+      })
+      .eq(
+        "id",
+        paymentRecordId
+      );
+
+    const checkoutUrl =
+      "https://accept.paymob.com/unifiedcheckout/" +
+      `?publicKey=${encodeURIComponent(
+        environmentVariables.publicKey
+      )}` +
+      `&clientSecret=${encodeURIComponent(
+        clientSecret
+      )}`;
+
+    return NextResponse.json({
+      success: true,
+
+      checkoutUrl,
+
+      reference:
+        specialReference,
+
+      originalAmountCents,
+
+      discountAmountCents,
+
+      finalAmountCents,
+
+      promoCode:
+        appliedPromoCode ||
+        null,
+    });
+  } catch (error) {
+    console.error(
+      "Create Paymob intention error:",
+      error
+    );
+
+    await markPaymentFailed(
+      "unexpected_error"
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "حدث خطأ غير متوقع أثناء إنشاء عملية الدفع.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}
