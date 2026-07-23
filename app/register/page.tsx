@@ -16,7 +16,6 @@ import {
 
 import Navbar from "../../components/layout/Navbar";
 import Footer from "../../components/layout/Footer";
-import Button from "../../components/ui/Button";
 import GlassCard from "../../components/ui/GlassCard";
 import { createClient } from "../../lib/supabase/client";
 
@@ -32,8 +31,12 @@ export default function RegisterPage() {
   ] = useState(false);
 
   const [password, setPassword] = useState("");
+
   const [confirmPassword, setConfirmPassword] =
     useState("");
+
+  const [acceptTerms, setAcceptTerms] =
+    useState(false);
 
   const [passwordError, setPasswordError] =
     useState("");
@@ -45,6 +48,9 @@ export default function RegisterPage() {
     useState("");
 
   const [isLoading, setIsLoading] =
+    useState(false);
+
+  const [isGoogleLoading, setIsGoogleLoading] =
     useState(false);
 
   const handleSubmit = async (
@@ -59,6 +65,14 @@ export default function RegisterPage() {
     if (password !== confirmPassword) {
       setPasswordError(
         "كلمتا المرور غير متطابقتين."
+      );
+
+      return;
+    }
+
+    if (!acceptTerms) {
+      setErrorMessage(
+        "يجب الموافقة على الشروط والأحكام وسياسة الخصوصية."
       );
 
       return;
@@ -119,12 +133,55 @@ export default function RegisterPage() {
       form.reset();
       setPassword("");
       setConfirmPassword("");
+      setAcceptTerms(false);
     } catch {
       setErrorMessage(
         "حدث خطأ أثناء إنشاء الحساب. حاول مرة أخرى."
       );
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleGoogleRegister = async () => {
+    setPasswordError("");
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (!acceptTerms) {
+      setErrorMessage(
+        "يجب الموافقة على الشروط والأحكام وسياسة الخصوصية أولًا."
+      );
+
+      return;
+    }
+
+    setIsGoogleLoading(true);
+
+    try {
+      const supabase = createClient();
+
+      const { error } =
+        await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+          },
+        });
+
+      if (error) {
+        setErrorMessage(
+          "تعذر التسجيل باستخدام Google. حاول مرة أخرى."
+        );
+
+        setIsGoogleLoading(false);
+      }
+    } catch {
+      setErrorMessage(
+        "حدث خطأ أثناء الاتصال بخدمة Google. حاول مرة أخرى."
+      );
+
+      setIsGoogleLoading(false);
     }
   };
 
@@ -150,7 +207,8 @@ export default function RegisterPage() {
               </div>
 
               <h1 className="mt-10 text-5xl font-black leading-tight">
-                ابدأ رحلتك التعليمية مع Infinity Academy
+                ابدأ رحلتك التعليمية مع Infinity
+                Academy
               </h1>
 
               <p className="mt-6 max-w-lg text-lg leading-8 text-white/80">
@@ -166,7 +224,8 @@ export default function RegisterPage() {
 
               <p className="mt-3 leading-7 text-white/75">
                 كورسات، اختبارات، شهادات، متابعة تقدم
-                ومحتوى عملي يساعدك على بناء مهارات حقيقية.
+                ومحتوى عملي يساعدك على بناء مهارات
+                حقيقية.
               </p>
             </div>
           </div>
@@ -438,6 +497,13 @@ export default function RegisterPage() {
                     name="acceptTerms"
                     type="checkbox"
                     required
+                    checked={acceptTerms}
+                    onChange={(event) => {
+                      setAcceptTerms(
+                        event.target.checked
+                      );
+                      setErrorMessage("");
+                    }}
                     className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-purple-600"
                   />
 
@@ -481,7 +547,10 @@ export default function RegisterPage() {
 
                 <button
                   type="submit"
-                  disabled={isLoading}
+                  disabled={
+                    isLoading ||
+                    isGoogleLoading
+                  }
                   className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 font-black text-white shadow-lg shadow-purple-950/30 transition duration-300 hover:scale-[1.02] hover:shadow-purple-600/30 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
                 >
                   {isLoading
@@ -500,16 +569,23 @@ export default function RegisterPage() {
                 <div className="h-px flex-1 bg-white/10" />
               </div>
 
-              <Button
-                variant="secondary"
-                className="w-full py-4"
+              <button
+                type="button"
+                onClick={handleGoogleRegister}
+                disabled={
+                  isGoogleLoading ||
+                  isLoading
+                }
+                className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-6 py-4 font-bold text-white transition duration-300 hover:border-white/20 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-black text-zinc-900">
                   G
                 </span>
 
-                التسجيل باستخدام Google
-              </Button>
+                {isGoogleLoading
+                  ? "جارٍ الاتصال بـ Google..."
+                  : "التسجيل باستخدام Google"}
+              </button>
 
               <p className="mt-8 text-center text-zinc-400">
                 لديك حساب بالفعل؟{" "}

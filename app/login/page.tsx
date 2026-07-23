@@ -14,7 +14,6 @@ import {
 
 import Navbar from "../../components/layout/Navbar";
 import Footer from "../../components/layout/Footer";
-import Button from "../../components/ui/Button";
 import GlassCard from "../../components/ui/GlassCard";
 import { createClient } from "../../lib/supabase/client";
 
@@ -23,8 +22,13 @@ export default function LoginPage() {
 
   const [showPassword, setShowPassword] =
     useState(false);
+
   const [isLoading, setIsLoading] =
     useState(false);
+
+  const [isGoogleLoading, setIsGoogleLoading] =
+    useState(false);
+
   const [errorMessage, setErrorMessage] =
     useState("");
 
@@ -72,6 +76,37 @@ export default function LoginPage() {
       );
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setIsGoogleLoading(true);
+    setErrorMessage("");
+
+    try {
+      const supabase = createClient();
+
+      const { error } =
+        await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+          },
+        });
+
+      if (error) {
+        setErrorMessage(
+          "تعذر تسجيل الدخول باستخدام Google. حاول مرة أخرى."
+        );
+
+        setIsGoogleLoading(false);
+      }
+    } catch {
+      setErrorMessage(
+        "حدث خطأ أثناء الاتصال بخدمة Google. حاول مرة أخرى."
+      );
+
+      setIsGoogleLoading(false);
     }
   };
 
@@ -258,7 +293,10 @@ export default function LoginPage() {
 
                 <button
                   type="submit"
-                  disabled={isLoading}
+                  disabled={
+                    isLoading ||
+                    isGoogleLoading
+                  }
                   className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 font-black text-white shadow-lg shadow-purple-950/30 transition duration-300 hover:scale-[1.02] hover:shadow-purple-600/30 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
                 >
                   {isLoading
@@ -277,16 +315,23 @@ export default function LoginPage() {
                 <div className="h-px flex-1 bg-white/10" />
               </div>
 
-              <Button
-                variant="secondary"
-                className="w-full py-4"
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={
+                  isGoogleLoading ||
+                  isLoading
+                }
+                className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-6 py-4 font-bold text-white transition duration-300 hover:border-white/20 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-black text-zinc-900">
                   G
                 </span>
 
-                المتابعة باستخدام Google
-              </Button>
+                {isGoogleLoading
+                  ? "جارٍ الاتصال بـ Google..."
+                  : "المتابعة باستخدام Google"}
+              </button>
 
               <p className="mt-8 text-center text-zinc-400">
                 ليس لديك حساب؟{" "}
