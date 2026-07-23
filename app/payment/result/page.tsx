@@ -43,6 +43,8 @@ type SubscriptionRecord = {
 type SearchParams = {
   verified?: string | string[];
   verification_error?: string | string[];
+  reference?: string | string[];
+  payment_success?: string | string[];
 };
 
 type PaymentResultPageProps = {
@@ -78,7 +80,32 @@ function getVerificationErrorMessage(
       return "إعدادات التحقق من الدفع غير مكتملة داخل الخادم.";
 
     case "missing_parameters":
-      return "بيانات عملية الدفع المرسلة غير مكتملة.";
+    case "invalid_callback_data":
+      return "بيانات عملية الدفع المرسلة من Paymob غير مكتملة أو غير صحيحة.";
+
+    case "integration_mismatch":
+      return "عملية الدفع لا تخص تكامل Paymob المفعّل على الموقع.";
+
+    case "payment_not_found":
+      return "لم نعثر على عملية الدفع المطابقة داخل الموقع.";
+
+    case "amount_mismatch":
+      return "قيمة العملية القادمة من Paymob لا تطابق القيمة المسجلة داخل الموقع.";
+
+    case "currency_mismatch":
+      return "عملة عملية الدفع لا تطابق العملة المسجلة داخل الموقع.";
+
+    case "database_update_failed":
+      return "تم التحقق من رابط الدفع، لكن تعذر تحديث حالة العملية داخل قاعدة البيانات.";
+
+    case "promo_update_failed":
+      return "تمت معالجة الدفع، لكن تعذر تحديث استخدام كود الخصم.";
+
+    case "missing_reference":
+      return "مرجع عملية الدفع غير موجود في رابط التحويل.";
+
+    case "unexpected_error":
+      return "حدث خطأ غير متوقع أثناء التحقق من عملية الدفع.";
 
     default:
       return "تعذر التحقق من نتيجة عملية الدفع بأمان.";
@@ -129,15 +156,30 @@ export default async function PaymentResultPage({
       params.verification_error
     );
 
+  const reference = getSearchParam(
+    params.reference
+  ).trim();
+
   /*
-   * لا نعتمد على آخر عملية مدفوعة إذا كان رابط
-   * التحويل الحالي فشل في التحقق من HMAC.
+   * عند نجاح التحقق يجب أن يصل مرجع العملية.
+   * لا نسمح بعرض عملية قديمة اعتمادًا على verified=true فقط.
    */
   const verificationFailed =
-    verifiedParam === "false";
+    verifiedParam === "false" ||
+    (
+      verifiedParam === "true" &&
+      !reference
+    );
 
   const verificationSucceeded =
-    verifiedParam === "true";
+    verifiedParam === "true" &&
+    Boolean(reference);
+
+  const effectiveVerificationError =
+    verifiedParam === "true" &&
+    !reference
+      ? "missing_reference"
+      : verificationError;
 
   const supabase = await createClient();
 
@@ -168,29 +210,81 @@ export default async function PaymentResultPage({
     redirect("/login");
   }
 
-  const {
-    data: paymentData,
-    error: paymentError,
-  } = await supabase
-    .from("payment_transactions")
-    .select(
-      `
-        id,
-        plan_key,
-        status,
-        amount_cents,
-        currency,
-        special_reference,
-        created_at,
-        paid_at
-      `
-    )
-    .eq("user_id", userId)
-    .order("created_at", {
-      ascending: false,
-    })
-    .limit(1)
-    .maybeSingle();
+  let paymentData:
+    | PaymentRecord
+    | null = null;
+
+  let paymentError:
+    | { message?: string }
+    | null = null;
+
+  /*
+   * لو مرجع العملية موجود، نبحث به مع user_id.
+   * ده يمنع عرض آخر محاولة دفع مختلفة للمستخدم.
+   */
+  if (reference) {
+    const {
+      data,
+      error,
+    } = await supabase
+      .from("payment_transactions")
+      .select(
+        `
+          id,
+          plan_key,
+          status,
+          amount_cents,
+          currency,
+          special_reference,
+          created_at,
+          paid_at
+        `
+      )
+      .eq("user_id", userId)
+      .eq(
+        "special_reference",
+        reference
+      )
+      .maybeSingle();
+
+    paymentData =
+      data as PaymentRecord | null;
+
+    paymentError = error;
+  } else if (!verificationFailed) {
+    /*
+     * السماح بفتح الصفحة مباشرة بدون بارامترات:
+     * نعرض آخر عملية للمستخدم فقط في هذه الحالة.
+     */
+    const {
+      data,
+      error,
+    } = await supabase
+      .from("payment_transactions")
+      .select(
+        `
+          id,
+          plan_key,
+          status,
+          amount_cents,
+          currency,
+          special_reference,
+          created_at,
+          paid_at
+        `
+      )
+      .eq("user_id", userId)
+      .order("created_at", {
+        ascending: false,
+      })
+      .limit(1)
+      .maybeSingle();
+
+    paymentData =
+      data as PaymentRecord | null;
+
+    paymentError = error;
+  }
 
   if (paymentError) {
     console.error(
@@ -199,12 +293,11 @@ export default async function PaymentResultPage({
     );
   }
 
-  const payment =
-    paymentData as PaymentRecord | null;
+  const payment = paymentData;
 
   /*
-   * لو الرابط الحالي غير موثوق، لا نعرض اشتراكًا
-   * ناجحًا اعتمادًا على عملية قديمة.
+   * لو الرابط الحالي غير موثوق، لا نعرض نجاح
+   * أي عملية قديمة أو مختلفة.
    */
   const isPaid =
     !verificationFailed &&
@@ -263,7 +356,7 @@ export default async function PaymentResultPage({
 
   const verificationErrorMessage =
     getVerificationErrorMessage(
-      verificationError
+      effectiveVerificationError
     );
 
   return (
@@ -319,15 +412,14 @@ export default async function PaymentResultPage({
               <div className="p-7 md:p-9">
                 <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/[0.05] p-5">
                   <p className="font-bold text-yellow-300">
-                    لم يتم عرض نجاح عملية قديمة
+                    لم يتم عرض عملية أخرى بالخطأ
                   </p>
 
                   <p className="mt-2 leading-7 text-zinc-400">
-                    لن تعتبر هذه الصفحة عملية
-                    الدفع ناجحة إلا بعد التحقق
-                    الصحيح من رابط Paymob أو تحديث
-                    حالة العملية داخل قاعدة
-                    البيانات.
+                    الصفحة لا تعتبر الدفع ناجحًا
+                    إلا بعد التحقق من الرابط
+                    والعثور على نفس مرجع العملية
+                    داخل حسابك.
                   </p>
                 </div>
 
@@ -357,7 +449,7 @@ export default async function PaymentResultPage({
               />
 
               <h2 className="mt-6 text-3xl font-black">
-                لم نجد عملية دفع حديثة
+                لم نجد عملية الدفع المطلوبة
               </h2>
 
               <p className="mt-4 leading-8 text-zinc-400">
@@ -394,7 +486,7 @@ export default async function PaymentResultPage({
                   {verificationSucceeded && (
                     <p className="mt-3 text-sm font-bold text-emerald-300/70">
                       تم التحقق من رابط Paymob
-                      بنجاح.
+                      وربطه بنفس العملية بنجاح.
                     </p>
                   )}
                 </div>
