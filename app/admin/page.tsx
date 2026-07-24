@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Tags,
   TicketPercent,
+  UserCog,
   Users,
   UsersRound,
   WalletCards,
@@ -70,6 +71,13 @@ const managementSections = [
       "عرض حسابات الطلاب ومتابعة بياناتهم وتقدمهم.",
     href: "/admin/students",
     icon: Users,
+  },
+  {
+    title: "إدارة الأدمنز",
+    description:
+      "إضافة أدمنز جدد والتحكم في صلاحيات حسابات الإدارة.",
+    href: "/admin/admins",
+    icon: UserCog,
   },
   {
     title: "إدارة الاشتراكات",
@@ -165,8 +173,8 @@ export default async function AdminPage() {
                   تحكم في الكورسات والتصنيفات
                   وفرق التدريس والدروس
                   والأسعار وأكواد الخصم
-                  والطلاب والاشتراكات من
-                  مكان واحد.
+                  والطلاب والأدمنز
+                  والاشتراكات من مكان واحد.
                 </p>
               </div>
             </div>
