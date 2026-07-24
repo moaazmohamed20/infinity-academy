@@ -15,6 +15,7 @@ import {
   LogOut,
   Menu,
   Search,
+  ShieldCheck,
   User,
   X,
 } from "lucide-react";
@@ -23,6 +24,8 @@ import Button from "../ui/Button";
 import NavLink from "../ui/NavLink";
 import { navigationLinks } from "@/data/navigation";
 import { createClient } from "@/lib/supabase/client";
+
+type UserRole = "admin" | "student" | null;
 
 export default function Navbar() {
   const router = useRouter();
@@ -38,11 +41,24 @@ export default function Navbar() {
   const [isAuthenticated, setIsAuthenticated] =
     useState(false);
 
+  const [userRole, setUserRole] =
+    useState<UserRole>(null);
+
   const [authReady, setAuthReady] =
     useState(false);
 
   const [isSigningOut, setIsSigningOut] =
     useState(false);
+
+  const isAdmin = userRole === "admin";
+
+  const accountPanelHref = isAdmin
+    ? "/admin"
+    : "/dashboard";
+
+  const accountPanelTitle = isAdmin
+    ? "لوحة الإدارة"
+    : "لوحة التحكم";
 
   const closeMenu = () => {
     setMenuOpen(false);
@@ -50,6 +66,47 @@ export default function Navbar() {
 
   useEffect(() => {
     let isMounted = true;
+
+    const loadUserRole = async (
+      userId: string | null
+    ) => {
+      if (!userId) {
+        if (isMounted) {
+          setUserRole(null);
+        }
+
+        return;
+      }
+
+      const {
+        data: profile,
+        error,
+      } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (error) {
+        console.error(
+          "تعذر تحميل صلاحية المستخدم:",
+          error
+        );
+
+        setUserRole("student");
+        return;
+      }
+
+      setUserRole(
+        profile?.role === "admin"
+          ? "admin"
+          : "student"
+      );
+    };
 
     const loadUser = async () => {
       const {
@@ -61,7 +118,14 @@ export default function Navbar() {
       }
 
       setIsAuthenticated(Boolean(user));
-      setAuthReady(true);
+
+      await loadUserRole(
+        user?.id ?? null
+      );
+
+      if (isMounted) {
+        setAuthReady(true);
+      }
     };
 
     void loadUser();
@@ -74,11 +138,19 @@ export default function Navbar() {
           return;
         }
 
-        setIsAuthenticated(
-          Boolean(session?.user)
-        );
+        const user =
+          session?.user ?? null;
 
-        setAuthReady(true);
+        setIsAuthenticated(Boolean(user));
+        setAuthReady(false);
+
+        void loadUserRole(
+          user?.id ?? null
+        ).finally(() => {
+          if (isMounted) {
+            setAuthReady(true);
+          }
+        });
       }
     );
 
@@ -128,6 +200,7 @@ export default function Navbar() {
       }
 
       setIsAuthenticated(false);
+      setUserRole(null);
       closeMenu();
 
       router.replace("/");
@@ -210,12 +283,17 @@ export default function Navbar() {
             ) : isAuthenticated ? (
               <div className="flex items-center gap-2">
                 <Button
-                  href="/dashboard"
+                  href={accountPanelHref}
                   variant="secondary"
                   className="h-11 px-4 text-sm"
                 >
-                  <LayoutDashboard size={18} />
-                  لوحة التحكم
+                  {isAdmin ? (
+                    <ShieldCheck size={18} />
+                  ) : (
+                    <LayoutDashboard size={18} />
+                  )}
+
+                  {accountPanelTitle}
                 </Button>
 
                 <button
@@ -311,12 +389,17 @@ export default function Navbar() {
             ) : isAuthenticated ? (
               <>
                 <Link
-                  href="/dashboard"
+                  href={accountPanelHref}
                   onClick={closeMenu}
                   className="flex items-center justify-center gap-2 rounded-xl border border-purple-500/40 bg-purple-500/10 px-3 py-3 text-sm font-semibold text-white transition hover:bg-purple-500/20"
                 >
-                  <LayoutDashboard size={17} />
-                  لوحة التحكم
+                  {isAdmin ? (
+                    <ShieldCheck size={17} />
+                  ) : (
+                    <LayoutDashboard size={17} />
+                  )}
+
+                  {accountPanelTitle}
                 </Link>
 
                 <button

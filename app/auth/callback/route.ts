@@ -34,24 +34,59 @@ export async function GET(
       await createClient();
 
     const {
-      error,
+      error: exchangeError,
     } =
       await supabase.auth.exchangeCodeForSession(
         code
       );
 
-    if (!error) {
-      return NextResponse.redirect(
-        new URL(
-          safeNext,
-          requestUrl.origin
-        )
-      );
+    if (!exchangeError) {
+      const {
+        data: { user },
+        error: userError,
+      } =
+        await supabase.auth.getUser();
+
+      if (!userError && user) {
+        const {
+          data: profile,
+          error: profileError,
+        } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (profileError) {
+          console.error(
+            "Profile role error:",
+            profileError
+          );
+        }
+
+        const isAdmin =
+          profile?.role === "admin";
+
+        const destination = isAdmin
+          ? "/admin"
+          : safeNext.startsWith(
+                "/admin"
+              )
+            ? "/dashboard"
+            : safeNext;
+
+        return NextResponse.redirect(
+          new URL(
+            destination,
+            requestUrl.origin
+          )
+        );
+      }
     }
 
     console.error(
       "Google OAuth callback error:",
-      error
+      exchangeError
     );
   }
 
