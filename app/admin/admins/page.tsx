@@ -8,8 +8,6 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
-  UserMinus,
-  UserPlus,
   UsersRound,
 } from "lucide-react";
 
@@ -22,6 +20,7 @@ import {
   demoteAdmin,
   promoteToAdmin,
 } from "./actions";
+import SubmitButton from "./SubmitButton";
 
 type PageProps = {
   searchParams: Promise<{
@@ -465,6 +464,7 @@ export default async function AdminAdminsPage({
                           <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-500 sm:flex-row sm:gap-5">
                             <span className="flex items-center gap-2">
                               <Mail size={15} />
+
                               {account.email ||
                                 "لا يوجد بريد"}
                             </span>
@@ -473,6 +473,7 @@ export default async function AdminAdminsPage({
                               <CalendarDays
                                 size={15}
                               />
+
                               انضم في{" "}
                               {formatDate(
                                 account.joined_at
@@ -499,15 +500,9 @@ export default async function AdminAdminsPage({
                             }
                           />
 
-                          <button
-                            type="submit"
-                            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-5 py-3 font-bold text-red-300 transition hover:border-red-500/50 hover:bg-red-500/20"
-                          >
-                            <UserMinus
-                              size={18}
-                            />
-                            إلغاء صلاحية الأدمن
-                          </button>
+                          <SubmitButton
+                            actionType="demote"
+                          />
                         </form>
                       )}
                     </div>
@@ -567,6 +562,7 @@ export default async function AdminAdminsPage({
                           <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-500 sm:flex-row sm:gap-5">
                             <span className="flex items-center gap-2">
                               <Mail size={15} />
+
                               {account.email ||
                                 "لا يوجد بريد"}
                             </span>
@@ -575,6 +571,7 @@ export default async function AdminAdminsPage({
                               <CalendarDays
                                 size={15}
                               />
+
                               انضم في{" "}
                               {formatDate(
                                 account.joined_at
@@ -595,13 +592,9 @@ export default async function AdminAdminsPage({
                           }
                         />
 
-                        <button
-                          type="submit"
-                          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-5 py-3 font-black transition hover:brightness-110"
-                        >
-                          <UserPlus size={18} />
-                          منحه صلاحية الأدمن
-                        </button>
+                        <SubmitButton
+                          actionType="promote"
+                        />
                       </form>
                     </div>
                   </GlassCard>
