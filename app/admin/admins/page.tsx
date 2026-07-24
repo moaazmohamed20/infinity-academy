@@ -92,8 +92,8 @@ const errorMessages: Record<string, string> = {
     "لم يتم العثور على الحساب المطلوب.",
   already_admin:
     "هذا الحساب يمتلك صلاحية الأدمن بالفعل.",
-  cannot_demote_self:
-    "لا يمكنك إلغاء صلاحية الأدمن من حسابك الحالي.",
+  cannot_demote_owner:
+    "لا يمكن إلغاء صلاحية مالك المنصة.",
   last_admin:
     "لا يمكن إزالة صلاحية آخر أدمن في المنصة.",
   not_admin:
@@ -157,16 +157,19 @@ export default async function AdminAdminsPage({
     error: profileError,
   } = await supabase
     .from("profiles")
-    .select("full_name, role")
+    .select(
+      "full_name, role, is_owner"
+    )
     .eq("id", currentUserId)
     .maybeSingle();
 
   if (
     profileError ||
     !currentProfile ||
-    currentProfile.role !== "admin"
+    currentProfile.role !== "admin" ||
+    currentProfile.is_owner !== true
   ) {
-    redirect("/");
+    redirect("/admin");
   }
 
   const {
@@ -274,7 +277,7 @@ export default async function AdminAdminsPage({
 
             <div>
               <p className="text-sm font-bold text-purple-400">
-                صلاحيات المنصة
+                صلاحيات مالك المنصة
               </p>
 
               <h1 className="mt-2 text-3xl font-black md:text-5xl">
@@ -282,9 +285,10 @@ export default async function AdminAdminsPage({
               </h1>
 
               <p className="mt-3 max-w-2xl leading-7 text-zinc-400">
-                امنح حسابًا مسجلًا صلاحية
-                الإدارة أو ألغِ الصلاحية من
-                أحد الأدمنز الحاليين.
+                هذه الصفحة متاحة لمالك
+                المنصة فقط، ويمكنك من خلالها
+                منح صلاحية الإدارة أو إلغاؤها
+                من الأدمنز الحاليين.
               </p>
             </div>
           </div>
@@ -342,17 +346,17 @@ export default async function AdminAdminsPage({
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-semibold text-zinc-400">
-                  حسابك الحالي
+                  مالك المنصة
                 </p>
 
                 <p className="mt-3 text-xl font-black">
                   {currentProfile.full_name ||
-                    "مدير المنصة"}
+                    "مالك المنصة"}
                 </p>
               </div>
 
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
-                <ShieldCheck size={23} />
+                <Crown size={23} />
               </div>
             </div>
           </GlassCard>
@@ -426,7 +430,7 @@ export default async function AdminAdminsPage({
           <div className="mt-7 space-y-4">
             {adminAccounts.length > 0 ? (
               adminAccounts.map((account) => {
-                const isCurrentAccount =
+                const isOwnerAccount =
                   account.user_id ===
                   currentUserId;
 
@@ -454,9 +458,9 @@ export default async function AdminAdminsPage({
                               أدمن
                             </span>
 
-                            {isCurrentAccount && (
-                              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
-                                حسابك الحالي
+                            {isOwnerAccount && (
+                              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-300">
+                                مالك المنصة
                               </span>
                             )}
                           </div>
@@ -483,10 +487,9 @@ export default async function AdminAdminsPage({
                         </div>
                       </div>
 
-                      {isCurrentAccount ? (
-                        <div className="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-zinc-500">
-                          لا يمكن إلغاء صلاحيتك
-                          من هنا
+                      {isOwnerAccount ? (
+                        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-5 py-3 text-sm font-bold text-amber-300">
+                          حساب المالك محمي
                         </div>
                       ) : (
                         <form

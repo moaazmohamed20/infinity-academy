@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-async function getCurrentAdminId() {
+async function getCurrentOwnerId() {
   const supabase = await createClient();
 
   const {
@@ -32,16 +32,19 @@ async function getCurrentAdminId() {
     error: profileError,
   } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, is_owner")
     .eq("id", currentUserId)
     .maybeSingle();
 
   if (
     profileError ||
     !profile ||
-    profile.role !== "admin"
+    profile.role !== "admin" ||
+    profile.is_owner !== true
   ) {
-    redirect("/");
+    redirect(
+      "/admin?error=owner_permission_required"
+    );
   }
 
   return currentUserId;
@@ -56,7 +59,7 @@ function getUserId(formData: FormData) {
 export async function promoteToAdmin(
   formData: FormData
 ) {
-  await getCurrentAdminId();
+  await getCurrentOwnerId();
 
   const userId = getUserId(formData);
 
@@ -74,7 +77,7 @@ export async function promoteToAdmin(
     error: targetError,
   } = await adminClient
     .from("profiles")
-    .select("id, role")
+    .select("id, role, is_owner")
     .eq("id", userId)
     .maybeSingle();
 
@@ -99,7 +102,8 @@ export async function promoteToAdmin(
       .update({
         role: "admin",
       })
-      .eq("id", userId);
+      .eq("id", userId)
+      .eq("is_owner", false);
 
   if (updateError) {
     console.error(
@@ -124,8 +128,8 @@ export async function promoteToAdmin(
 export async function demoteAdmin(
   formData: FormData
 ) {
-  const currentAdminId =
-    await getCurrentAdminId();
+  const currentOwnerId =
+    await getCurrentOwnerId();
 
   const userId = getUserId(formData);
 
@@ -135,9 +139,9 @@ export async function demoteAdmin(
     );
   }
 
-  if (userId === currentAdminId) {
+  if (userId === currentOwnerId) {
     redirect(
-      "/admin/admins?error=cannot_demote_self"
+      "/admin/admins?error=cannot_demote_owner"
     );
   }
 
@@ -145,42 +149,11 @@ export async function demoteAdmin(
     createAdminClient();
 
   const {
-    count: adminsCount,
-    error: countError,
-  } = await adminClient
-    .from("profiles")
-    .select("id", {
-      count: "exact",
-      head: true,
-    })
-    .eq("role", "admin");
-
-  if (countError) {
-    console.error(
-      "Admin count error:",
-      countError
-    );
-
-    redirect(
-      "/admin/admins?error=count_failed"
-    );
-  }
-
-  if (
-    typeof adminsCount !== "number" ||
-    adminsCount <= 1
-  ) {
-    redirect(
-      "/admin/admins?error=last_admin"
-    );
-  }
-
-  const {
     data: targetProfile,
     error: targetError,
   } = await adminClient
     .from("profiles")
-    .select("id, role")
+    .select("id, role, is_owner")
     .eq("id", userId)
     .maybeSingle();
 
@@ -190,6 +163,12 @@ export async function demoteAdmin(
   ) {
     redirect(
       "/admin/admins?error=user_not_found"
+    );
+  }
+
+  if (targetProfile.is_owner === true) {
+    redirect(
+      "/admin/admins?error=cannot_demote_owner"
     );
   }
 
@@ -205,7 +184,8 @@ export async function demoteAdmin(
       .update({
         role: "student",
       })
-      .eq("id", userId);
+      .eq("id", userId)
+      .eq("is_owner", false);
 
   if (updateError) {
     console.error(
