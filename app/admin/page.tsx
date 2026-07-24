@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import type { LucideIcon } from "lucide-react";
 
 import {
   BookOpen,
@@ -22,7 +23,15 @@ import Footer from "../../components/layout/Footer";
 import GlassCard from "../../components/ui/GlassCard";
 import { createClient } from "../../lib/supabase/server";
 
-const managementSections = [
+type ManagementSection = {
+  title: string;
+  description: string;
+  href: string;
+  icon: LucideIcon;
+  ownerOnly?: boolean;
+};
+
+const managementSections: ManagementSection[] = [
   {
     title: "إدارة الكورسات",
     description:
@@ -78,6 +87,7 @@ const managementSections = [
       "إضافة أدمنز جدد والتحكم في صلاحيات حسابات الإدارة.",
     href: "/admin/admins",
     icon: UserCog,
+    ownerOnly: true,
   },
   {
     title: "إدارة الاشتراكات",
@@ -123,7 +133,9 @@ export default async function AdminPage() {
     error: profileError,
   } = await supabase
     .from("profiles")
-    .select("full_name, role")
+    .select(
+      "full_name, role, is_owner"
+    )
     .eq("id", userId)
     .maybeSingle();
 
@@ -135,12 +147,23 @@ export default async function AdminPage() {
     redirect("/dashboard");
   }
 
+  const isOwner =
+    profile.is_owner === true;
+
+  const visibleManagementSections =
+    managementSections.filter(
+      (section) =>
+        !section.ownerOnly || isOwner
+    );
+
   const fullName =
     typeof profile.full_name ===
       "string" &&
     profile.full_name.trim()
       ? profile.full_name.trim()
-      : "مدير المنصة";
+      : isOwner
+        ? "مالك المنصة"
+        : "مدير المنصة";
 
   return (
     <main className="min-h-screen bg-[#09090B] text-white">
@@ -162,7 +185,9 @@ export default async function AdminPage() {
 
               <div>
                 <p className="text-sm font-bold text-purple-400">
-                  لوحة إدارة المنصة
+                  {isOwner
+                    ? "لوحة مالك المنصة"
+                    : "لوحة إدارة المنصة"}
                 </p>
 
                 <h1 className="mt-2 text-3xl font-black md:text-5xl">
@@ -170,11 +195,9 @@ export default async function AdminPage() {
                 </h1>
 
                 <p className="mt-3 max-w-2xl leading-7 text-zinc-400">
-                  تحكم في الكورسات والتصنيفات
-                  وفرق التدريس والدروس
-                  والأسعار وأكواد الخصم
-                  والطلاب والأدمنز
-                  والاشتراكات من مكان واحد.
+                  {isOwner
+                    ? "تحكم في الكورسات والتصنيفات وفرق التدريس والدروس والأسعار وأكواد الخصم والطلاب والأدمنز والاشتراكات من مكان واحد."
+                    : "تحكم في الكورسات والتصنيفات وفرق التدريس والدروس والأسعار وأكواد الخصم والطلاب والاشتراكات من مكان واحد."}
                 </p>
               </div>
             </div>
@@ -207,7 +230,7 @@ export default async function AdminPage() {
           </div>
 
           <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-            {managementSections.map(
+            {visibleManagementSections.map(
               (section) => {
                 const Icon =
                   section.icon;
@@ -262,17 +285,24 @@ export default async function AdminPage() {
 
                 <div>
                   <h3 className="text-xl font-black">
-                    إعدادات المدير
+                    إعدادات الحساب
                   </h3>
 
                   <p className="mt-2 leading-7 text-zinc-400">
-                    تحديث اسم المدير ورقم
-                    الهاتف وكلمة مرور
-                    الحساب.
+                    تحديث الاسم ورقم الهاتف
+                    وكلمة مرور الحساب.
                   </p>
 
-                  <span className="mt-4 inline-flex w-fit rounded-full border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-300">
-                    صلاحية Admin مفعّلة
+                  <span
+                    className={`mt-4 inline-flex w-fit rounded-full border px-4 py-2 text-sm font-bold ${
+                      isOwner
+                        ? "border-amber-500/20 bg-amber-500/10 text-amber-300"
+                        : "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+                    }`}
+                  >
+                    {isOwner
+                      ? "صلاحية مالك المنصة مفعّلة"
+                      : "صلاحية Admin مفعّلة"}
                   </span>
                 </div>
               </div>
@@ -282,7 +312,7 @@ export default async function AdminPage() {
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 font-black text-white transition hover:brightness-110 sm:w-fit"
               >
                 <Settings size={19} />
-                فتح إعدادات المدير
+                فتح إعدادات الحساب
                 <ChevronLeft size={18} />
               </Link>
             </div>
