@@ -46,7 +46,9 @@ export default function LoginPage() {
 
     const email = String(
       formData.get("email") ?? ""
-    ).trim();
+    )
+      .trim()
+      .toLowerCase();
 
     const password = String(
       formData.get("password") ?? ""
@@ -55,22 +57,55 @@ export default function LoginPage() {
     try {
       const supabase = createClient();
 
-      const { error } =
+      const {
+        data: signInData,
+        error: signInError,
+      } =
         await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
-      if (error) {
+      if (
+        signInError ||
+        !signInData.user
+      ) {
         setErrorMessage(
           "البريد الإلكتروني أو كلمة المرور غير صحيحة."
         );
+
         return;
       }
 
-      router.replace("/dashboard");
+      const {
+        data: profile,
+        error: profileError,
+      } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", signInData.user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error(
+          "تعذر تحميل صلاحية المستخدم:",
+          profileError
+        );
+      }
+
+      const destination =
+        profile?.role === "admin"
+          ? "/admin"
+          : "/dashboard";
+
+      router.replace(destination);
       router.refresh();
-    } catch {
+    } catch (error) {
+      console.error(
+        "Login error:",
+        error
+      );
+
       setErrorMessage(
         "حدث خطأ أثناء تسجيل الدخول. حاول مرة أخرى."
       );
@@ -101,7 +136,12 @@ export default function LoginPage() {
 
         setIsGoogleLoading(false);
       }
-    } catch {
+    } catch (error) {
+      console.error(
+        "Google login error:",
+        error
+      );
+
       setErrorMessage(
         "حدث خطأ أثناء الاتصال بخدمة Google. حاول مرة أخرى."
       );
